@@ -1,0 +1,151 @@
+/**
+* @file resources/less/components/header.less
+*
+* Copyright (c) 2014-2020 Simon Fraser University
+* Copyright (c) 2003-2020 John Willinsky
+* Distributed under the GNU GPL v2. For full terms see the file docs/COPYING.
+*
+* @brief Stylesheet for the page’s main header, <header>
+*
+*/
+
+.main-header {
+	display: flex;
+  flex-direction: column;
+	padding-top: 1vh;
+	padding-bottom: 1vh;
+	font-family: @font-family-secondary;
+	font-weight: 300;
+	font-size: 16px;
+	min-height: 125px;
+	background-color: @contrast-colour;
+}
+
+.main-header ul {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	text-align: center;
+}
+
+.main-header li {
+	display: inline-block;
+}
+
+.main-header a {
+	display: block;
+	padding: .5em;
+	border: 0;
+	box-shadow: none;
+	text-decoration: none;
+	font-family: @font-family-secondary;
+	color: contrast(@contrast-colour);
+}
+
+/* User nav */
+.main-header__admin {
+	display: flex;
+	font-size: smaller;
+
+	&_locale-enabled {
+		justify-content: space-between;
+	}
+
+	&_locale-disabled {
+		justify-content: flex-end;
+	}
+}
+
+/* Primary nav */
+.main-menu {
+	display: flex;
+  flex-wrap: wrap;
+	flex-grow: 1;
+	padding: 0;
+	height: 100%;
+}
+
+.main-menu__logo,
+.main-menu__title {
+	display: inline-flex;
+	margin: auto 1em 0 0;
+	padding-top: 2em;
+	line-height: 1.5;
+	font-size: 1em;
+	letter-spacing: normal;
+	font-family: @font-family-secondary;
+	font-weight: 700;
+
+	img {
+		max-height: 35px;
+		width: auto;
+	}
+}
+
+.main-menu__nav {
+	margin-top: auto;
+}
+
+.main-menu__nav-item {
+	margin: 0 0.25vw;
+}
+
+.main-menu__nav-link {
+	display: block;
+	padding: 0 0.5em;
+	color: contrast(@contrast-colour);
+
+	&:hover,
+	&:focus,
+	&:active {
+		color: @contrast-colour;
+		background-color: contrast(@contrast-colour);
+	}
+}
+
+/* Custom hamburger menu */
+.hamburger {
+	display: inline-flex;
+	margin-top: auto;
+	font: inherit;
+	overflow: visible;
+	cursor: pointer;
+	color: inherit;
+	border: 0;
+	border-radius: 0;
+	height: 40px;
+}
+
+.hamburger__wrapper {
+	position: relative;
+	display: inline-block;
+	width: 30px;
+	height: 20px;
+}
+
+.hamburger__icon {
+	background-color: contrast(@contrast-colour);
+	top: 2px;
+	position: absolute;
+	width: 30px;
+	height: 2px;
+	display: block;
+	margin-top: -2px;
+
+	&:before {
+		top: 10px;
+	}
+
+	&:after {
+		top: 20px;
+	}
+
+	&:before, &:after {
+		background-color: contrast(@contrast-colour);
+		display: block;
+		content: "";
+		position: absolute;
+		width: 30px;
+		height: 2px;
+	}
+}

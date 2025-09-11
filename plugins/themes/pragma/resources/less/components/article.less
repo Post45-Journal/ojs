@@ -1,0 +1,37 @@
+/**
+* @file resources/less/components/article.less
+*
+* Copyright (c) 2014-2020 Simon Fraser University
+* Copyright (c) 2003-2020 John Willinsky
+* Distributed under the GNU GPL v2. For full terms see the file docs/COPYING.
+*
+* @brief Styling for a single article block (i.e. a bibliographic record)
+*
+*/
+
+.article {
+	margin-bottom: 5vh;
+}
+
+.article__title {
+	margin: 0 0 0.25em 0;
+	font-family: @font-family-primary;
+	font-weight: 400;
+}
+
+.article__img {
+	margin: 0 0 2.5vh 0;
+	min-width: 100%;
+}
+
+.article__img img {
+	mix-blend-mode: multiply;
+}
+
+.article__rorImage {
+	padding-left: 5px;
+}
+
+#citationOutput .csl-left-margin {
+	display: none;
+}

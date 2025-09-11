@@ -1,0 +1,165 @@
+/**
+ * @file resources/less/general.less
+ *
+ * Copyright (c) 2014-2020 Simon Fraser University
+ * Copyright (c) 2003-2020 John Willinsky
+ * Distributed under the GNU GPL v2. For full terms see the file docs/COPYING.
+ *
+ * @brief Basic HTML markup styles
+ *
+ */
+
+body {
+  font-family: @font-family-primary;
+  line-height: 1.5;
+  font-size: 18px;
+  font-weight: 400;
+  color: @contrast-colour;
+  font-size: 18px;
+  font-weight: 400;
+	word-break: break-word;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: none;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  background-color: @primary-colour;
+}
+
+h1, h2, h3, h4, h5, h6, th {
+  margin-top: 1.25em;
+  font-family: @font-family-secondary;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+	color: @contrast-colour;
+
+	a {
+		text-decoration: none;
+	}
+}
+
+h1:first-of-type {
+  margin-top: 0;
+}
+
+p, li, blockquote, cite, dd {
+  margin-bottom: 1.25rem;
+}
+
+blockquote {
+	border-left: 2px solid @tertiary-contrast-colour;
+	padding: 0.5em 1.5em;
+}
+
+aside {
+	font-size: smaller;
+
+	h1, h2, h3, h4, h5, h6 {
+		font-size: 1rem;
+	}
+}
+
+section {
+  margin: 1em 0;
+}
+
+dt, address, table {
+  font-family: @font-family-primary;
+  font-size: smaller;
+}
+
+hr {
+  border-top: 1px solid @tertiary-contrast-colour;
+	margin-top: 2rem;
+	margin-bottom: 2rem;
+}
+
+table {
+  width: 100%;
+  max-width: 100%;
+  margin-bottom: 1rem;
+  font-family: @font-family-secondary;
+}
+
+thead {
+  border-bottom: 2px solid @contrast-colour;
+  text-transform: uppercase;
+}
+
+tr {
+  border-bottom: 1px solid @contrast-colour;
+}
+
+tr:last-child {
+  border: 0;
+}
+
+td, th {
+  padding: 1.15em 1em 1.15em 0;
+	word-break: keep-all;
+	vertical-align: top;
+}
+
+ul, ol {
+	padding-left: 1.5em;
+}
+
+li {
+  margin-bottom: 0.25em;
+}
+
+cite {
+  display: block;
+  text-align: right;
+}
+
+dt {
+  font-family: @font-family-secondary;
+  font-weight: 400;
+  margin: 30px 0 10px 0;
+}
+
+dt:first-child {
+  margin-top: 0;
+}
+
+code {
+  color: @contrast-colour;
+  font-size: smaller;
+}
+
+a {
+  color: @contrast-colour;
+  text-decoration: underline;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  word-wrap: break-word;
+}
+
+a:hover {
+  color: @contrast-colour;
+  text-decoration: none;
+}
+
+address a:hover {
+  color: @secondary-colour;
+  text-decoration: none;
+}
+
+::selection {
+  background-color: @contrast-colour;
+  color: @primary-colour;
+}
+
+.hidden {
+  display: none;
+}
+
+.context_privacy {
+	position: absolute;
+	left: -9999px;
+}
+
+.context_privacy_visible {
+	position: relative;
+	left: auto;
+}

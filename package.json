@@ -8,8 +8,10 @@
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
+    "start": "concurrently \"php -S localhost:8000\" \"npm run dev\" \"npm run watch:css\"",
     "dev": "vite build --watch --mode development",
     "dev:frontend": "vite build --watch --mode development --config vite.config.frontend.js",
+    "watch:css": "chokidar 'plugins/themes/pragmaSubmissions/styles/**/*.less' -c './refresh-css.sh'",
     "build": "npm run build:backend && npm run build:frontend",
     "build:backend": "vite build",
     "build:frontend": "vite build --config vite.config.frontend.js",
@@ -57,6 +59,8 @@
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/eslint-config-prettier": "^8.0.0",
     "autoprefixer": "^10.4.20",
+    "chokidar-cli": "^3.0.0",
+    "concurrently": "^9.2.1",
     "cypress": "^14.5.3",
     "cypress-failed-log": "2.10",
     "cypress-file-upload": "^5.0.8",
