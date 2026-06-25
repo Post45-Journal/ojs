@@ -14,9 +14,50 @@
    - Option 4: Use two-step verification (adds friction)
    - **Decision**: Disable one-click access due to incompatibility with email scanners
 
+3. **OJS upgrade 3.5.0-1 → 3.5.0-4 (June 2026)**
+   - Local upgraded via git rebase (with several gotchas resolved along the way)
+   - Prod upgraded via PKP tarball-overlay method (prod's git was a one-shot snapshot, not upstream-tracking)
+   - Migrations applied: I10962 (contextAcronym→journalAcronym rename), I11603 (missing UserRoleAssignment email), I11673 (missing reviewer suggestion approval), I12357 (decision constants fix — recovered any lost editorial decisions), I11800 (new USER_ROLE_MASTHEAD_UPDATE email template)
+   - submissionsOnly plugin updated to hide the new USER_ROLE_MASTHEAD_UPDATE template
+   - Detailed checklist preserved at `temp/prod-upgrade-checklist.md`
+
+4. **Special Issue Proposal Guidelines page** (added as a Custom Navigation Menu Item, editable via OJS admin)
+
 ## Pending Tasks ⏳
 
-### Immediate Priorities
+### Immediate Priority: Git Restructuring (Post45 Fork)
+
+**Goal:** End state where both local and prod track `Post45-Journal/ojs` (a fork of `pkp/ojs`) on its `main` branch. Future workflow: edit locally → push to fork's main → pull on prod.
+
+Currently:
+- Local is on `stable-3_5_0` with custom commits (the wrong shape — customizations shouldn't live on an upstream branch)
+- Prod has no remote tracking at all — just a one-shot "Initial Commit" snapshot
+- Custom `mailgun` plugin lives directly in `/var/www/html/plugins/generic/mailgun/` with its own `.git`, separate from the monorepo
+
+**Plan (see `temp/prod-upgrade-checklist.md` Phase 2 for the full procedure):**
+1. Create `Post45-Journal/ojs` fork on GitHub
+2. Move mailgun plugin into the post45-ojs-plugins-monorepo (consistency with colorPalettes/submissionsOnly/pragmaSubmissions)
+3. Restructure local to `main` branch tracking the fork
+4. Migrate prod's `.git` to track the fork
+5. Future upgrades: merge `upstream/stable-3_5_0` into fork's main, push, pull on prod
+
+### Scope Expansion: Extend OJS to Cover Copy Editing
+
+**Decision (June 2026):** OJS will now handle submissions, peer review, AND copy editing. Only proofs and publication move to WordPress. Previously OJS stopped at acceptance and post-acceptance work happened in Notion.
+
+**What changes:**
+- CLAUDE.md's "Submit → Review → Accept/Decline → Done" framing is now obsolete. Update to "Submit → Review → Accept → Copy Edit → Final Approval → (then WordPress for proofs/publication)".
+- The **Copyeditor role** was deleted at the DB level (per CLAUDE.md's role cleanup SQL). Needs to be restored. Easiest path: re-add via the OJS admin UI (Users & Roles → Roles → add "Copyeditor"). Don't re-run the role install migration — it would re-add all 12 deleted roles, including the publishing/subscription ones we still want gone.
+- The **submissionsOnly plugin's hidden email templates list** (`EmailTemplateHook.php`) needs revision. Currently hides `DISCUSSION_NOTIFICATION_COPYEDITING`, `EDITOR_DECISION_SEND_TO_PRODUCTION`, `EDITOR_DECISION_BACK_FROM_PRODUCTION`, `EDITOR_DECISION_NEW_ROUND` as part of "Publishing Workflow." With the scope expansion:
+  - **Unhide**: `DISCUSSION_NOTIFICATION_COPYEDITING` (we need this for copyediting discussions)
+  - **Keep hidden**: `EDITOR_DECISION_SEND_TO_PRODUCTION`, `EDITOR_DECISION_BACK_FROM_PRODUCTION`, `EDITOR_DECISION_NEW_ROUND`, `ISSUE_PUBLISH_NOTIFY`, `OPEN_ACCESS_NOTIFY`, `VERSION_CREATED` — these are all post-copyediting (production/publication), which stays out of OJS
+  - Update `email-templates-audit.md` accordingly
+- **Stage 4 email drafts** (Copy Editing stage): add Post45-voiced templates for `COPYEDIT_REQUEST` and related copy-editing emails, in the same format as Stages 1-3 in `temp/stage-1-email-drafts.md` etc.
+- **Stage 3 acceptance template revision**: the EDITOR_DECISION_ACCEPT drafts currently end with "Our editorial team will be in touch shortly with next steps for preparing the article for publication." This stays accurate, but could now reference the copy editing process more specifically since it happens in OJS.
+
+**Tackle this AFTER the git restructuring above.**
+
+### Other Immediate Priorities
 
 3. **Disable one-click reviewer access in production**
    - Go to Settings → Workflow → Review
