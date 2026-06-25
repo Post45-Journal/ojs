@@ -22,3 +22,7 @@ cypress/screenshots/
 .phpunit.result.cache
 /plugins/themes/default/js/lib/swiper/
 registry/uiLocaleKeysBackend.json
+# Plugin symlinks → monorepo (created per environment, see temp/prod-upgrade-checklist.md)
+/plugins/generic/colorPalettes
+/plugins/generic/submissionsOnly
+/plugins/themes/pragmaSubmissions
