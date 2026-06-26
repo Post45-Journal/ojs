@@ -16,7 +16,7 @@ ln -sf ../../lib/pkp/lib/vendor/tinymce/tinymce/plugins/fullscreen js/plugins/fu
 ln -sf ../../../lib/pkp/lib/vendor/tinymce/tinymce/skins/ui/tinymce-5 js/skins/ui/tinymce-5
 
 # Verify symlinks were created
-if [ -L "js/plugins/fullscreen/plugin.js" ] && [ -L "js/skins/ui/tinymce-5/content.css" ]; then
+if [ -e "js/plugins/fullscreen/plugin.js" ] && [ -e "js/skins/ui/tinymce-5/content.css" ]; then
     echo "✓ TinyMCE asset symlinks created successfully"
 else
     echo "✗ Error: Symlinks not created properly"
