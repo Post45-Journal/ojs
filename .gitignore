@@ -25,4 +25,9 @@ registry/uiLocaleKeysBackend.json
 # Plugin symlinks → monorepo (created per environment, see temp/prod-upgrade-checklist.md)
 /plugins/generic/colorPalettes
 /plugins/generic/submissionsOnly
+/plugins/generic/mailgun
 /plugins/themes/pragmaSubmissions
+
+# TinyMCE asset symlinks (created by scripts/post-update-assets.sh)
+/js/plugins/
+/js/skins/
