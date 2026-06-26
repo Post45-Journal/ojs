@@ -23,23 +23,14 @@
 
 4. **Special Issue Proposal Guidelines page** (added as a Custom Navigation Menu Item, editable via OJS admin)
 
+5. **Git restructuring: Post45 fork (June 2026)**
+   - `Post45-Journal/ojs` fork created on GitHub; both local and prod now track it on `main`
+   - `mailgun` plugin moved into `post45-ojs-plugins-monorepo` (consistent with other custom plugins, no more "git inside git")
+   - Prod fully fresh-cloned from the fork (replaced tarball install) with build pipeline: `npm install && npm run build` produces JS/CSS, `composer install` in `lib/pkp` populates PHP deps
+   - Future workflow: edit locally → push to fork main → `git pull` on prod
+   - Detailed migration record at `temp/prod-upgrade-checklist.md`. See CLAUDE.md "Deployment & Upgrade Workflow" for the ongoing flow.
+
 ## Pending Tasks ⏳
-
-### Immediate Priority: Git Restructuring (Post45 Fork)
-
-**Goal:** End state where both local and prod track `Post45-Journal/ojs` (a fork of `pkp/ojs`) on its `main` branch. Future workflow: edit locally → push to fork's main → pull on prod.
-
-Currently:
-- Local is on `stable-3_5_0` with custom commits (the wrong shape — customizations shouldn't live on an upstream branch)
-- Prod has no remote tracking at all — just a one-shot "Initial Commit" snapshot
-- Custom `mailgun` plugin lives directly in `/var/www/html/plugins/generic/mailgun/` with its own `.git`, separate from the monorepo
-
-**Plan (see `temp/prod-upgrade-checklist.md` Phase 2 for the full procedure):**
-1. Create `Post45-Journal/ojs` fork on GitHub
-2. Move mailgun plugin into the post45-ojs-plugins-monorepo (consistency with colorPalettes/submissionsOnly/pragmaSubmissions)
-3. Restructure local to `main` branch tracking the fork
-4. Migrate prod's `.git` to track the fork
-5. Future upgrades: merge `upstream/stable-3_5_0` into fork's main, push, pull on prod
 
 ### Scope Expansion: Extend OJS to Cover Copy Editing
 
@@ -55,7 +46,10 @@ Currently:
 - **Stage 4 email drafts** (Copy Editing stage): add Post45-voiced templates for `COPYEDIT_REQUEST` and related copy-editing emails, in the same format as Stages 1-3 in `temp/stage-1-email-drafts.md` etc.
 - **Stage 3 acceptance template revision**: the EDITOR_DECISION_ACCEPT drafts currently end with "Our editorial team will be in touch shortly with next steps for preparing the article for publication." This stays accurate, but could now reference the copy editing process more specifically since it happens in OJS.
 
-**Tackle this AFTER the git restructuring above.**
+**Possible plugin rename / refactor:** "submissionsOnly" is becoming a misnomer if copy editing is now in scope. Two options:
+- (a) Rename the plugin to something more accurate (e.g. `post45Customizations` or `editorialScopeFilter`)
+- (b) Generalize it: add per-area toggle settings (hide copyediting / hide production / hide publication). Post45's install would toggle off "production" and "publication" but leave "copyediting" on. This makes the plugin reusable by other journals with different scope choices.
+- Decision deferred — pick when actually doing the refactor.
 
 ### Other Immediate Priorities
 

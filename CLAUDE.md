@@ -3,6 +3,57 @@
 ## Project Goal
 Transform OJS 3.5 into a submissions-only management system by creating a child theme of Pragma that hides publishing functionality and provides a submissions-focused homepage.
 
+## Deployment & Upgrade Workflow (post-June 2026 restructuring)
+
+**Repo architecture:**
+- Source-of-truth: `Post45-Journal/ojs` on GitHub (fork of `pkp/ojs`). Default branch `main` = stable-3_5_0 + Post45 customizations.
+- Local: `~/dev/submissions-ojs` tracks `origin/main` (origin = fork). `upstream` remote points at `pkp/ojs` for pulling future stable-branch updates.
+- Prod (`submissions.post45.org`, Ubuntu 24.04, 1GB DO droplet): `/var/www/html` is a real git checkout tracking `origin/main`. Files dir is `/var/www/ojs-files` (outside web root). Plugin monorepo cloned at `/var/www/ojs-plugins-monorepo`.
+
+**Day-to-day edits (local → prod):**
+```bash
+# Local
+cd ~/dev/submissions-ojs
+# ...make changes...
+git push origin main
+
+# Prod
+ssh submissions.post45.org
+cd /var/www/html
+git pull origin main
+# If front-end assets changed (rare for theme/doc-only edits):
+NODE_OPTIONS=--max-old-space-size=1536 npm run build
+```
+
+**Major OJS upgrade (merge upstream stable-3_5_0 → main):**
+```bash
+# Local
+cd ~/dev/submissions-ojs
+git fetch upstream
+git merge upstream/stable-3_5_0
+# Resolve any conflicts in Post45 customizations
+git push origin main
+
+# Prod
+cd /var/www/html
+git pull origin main
+git submodule update --init --recursive
+cd lib/pkp && composer install --no-dev --optimize-autoloader && cd ../..
+cd plugins/paymethod/paypal && composer install --no-dev --optimize-autoloader && cd ../../..
+npm install
+NODE_OPTIONS=--max-old-space-size=1536 npm run build
+./scripts/post-update-assets.sh   # restores TinyMCE asset symlinks
+sudo systemctl restart apache2
+```
+
+**Prod-specific quirks:**
+- The 1GB droplet OOMs during Vite builds without help. Mitigations: 1GB swap at `/swapfile` (persistent via `/etc/fstab`) + `NODE_OPTIONS=--max-old-space-size=1536` on every build invocation. Consider upgrading to 2GB droplet long-term.
+- `config.inc.php` must be `chown ojsadmin:www-data` + `chmod 640` so apache (www-data) can read it but it's not world-readable.
+- Plugin symlinks (colorPalettes, submissionsOnly, mailgun, pragmaSubmissions) and TinyMCE asset symlinks (js/plugins/, js/skins/) are gitignored — recreated per environment.
+- `cache/`, `public/`, and `/var/www/ojs-files` must be `chown www-data:www-data`.
+
+**Migration record (one-time, June 2026):** `temp/prod-upgrade-checklist.md` documents the move from tarball install → proper git checkout. Keep for reference but don't re-execute.
+
 ## Current Status: ✅ THREE PLUGIN APPROACH + DATABASE CLEANUP
 
 Successfully implemented a three-plugin solution plus database-level role cleanup that transforms OJS into a submissions-only system with enhanced color customization:
