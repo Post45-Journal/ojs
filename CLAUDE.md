@@ -71,15 +71,17 @@ Successfully implemented a three-plugin solution plus database-level role cleanu
 ### 2. ✅ Database-Level Role Cleanup
 **Method**: Direct database deletion of unwanted default user groups
 - **Approach**: Removed publishing-related roles directly from MySQL database
-- **Deleted Roles** (12 total):
-  - Production Editor, Copyeditor, Designer
+- **Deleted Roles** (originally 12; Copyeditor re-added June 2026):
+  - Production Editor, Designer
   - Funding Coordinator, Indexer, Layout Editor
   - Marketing and Sales Coordinator, Proofreader, Translator
   - Reader, Subscription Manager, Editorial Board Member
-- **Remaining Roles** (submissions-focused, 6 total):
+- **Scope expansion (June 2026):** Copy editing is now in scope (handled in OJS). The Copyeditor role must be re-added via Users & Roles → Roles → "Add Role" in the admin UI. Do NOT re-run the install migration — it would re-add all 12 deleted roles. This is a per-environment manual step (apply on local and prod separately).
+- **Remaining Roles** (submissions + copyediting, 7 total):
   - Journal Manager, Journal Editor
   - Section Editor, Guest Editor
   - Author, Reviewer
+  - Copyeditor (re-added June 2026)
 - **Benefits**:
   - Clean, permanent solution with no JavaScript/CSS hiding needed
   - Unwanted roles completely removed from system
@@ -289,14 +291,15 @@ pkp.registry.storeExtend('fileManager_SUBMISSION_FILES', (piniaContext) => {
 **Goal**: Hide ALL non-submission elements throughout OJS workflow
 **Current Status**: Basic hiding implemented, needs comprehensive expansion
 
-**Required Enhancements**:
-- Hide email templates related to copyediting and production workflows
-- Remove publishing-related form fields and options throughout admin
-- Hide scheduled publication settings and related UI elements
-- Streamline author dashboard to remove publishing status indicators
-- Clean up workflow stages to focus purely on: Submit → Review → Accept/Decline
-- Remove DOI and citation management features
-- Hide issue management completely (current issues, back issues, future issues)
+**Active scope (revised June 2026):** Submit → Peer Review → Accept → Copy Edit → Proof Coordination → Mark Published on WordPress. All four OJS workflow stages (1, 3, 4, 5) are in scope. Stage 5 (Production) is repurposed as proof coordination — actual typesetting and publication happen on WordPress, but OJS provides the discussion thread + decision tracking surface for proof review. The terminal action is "Mark Published on WordPress" (custom decision added by post45Editorial), which sets STATUS_PUBLISHED, stores the WordPress URL on the publication, sends the author notification email, and blocks the public OJS article view.
+
+**Plugin restructure (June 2026):** `submissionsOnly` plugin was forked into `post45Editorial`. The original `submissionsOnly` (kept on disk as disabled backup) assumed OJS stopped at acceptance. The new `post45Editorial` plugin assumes OJS runs the full pipeline through "marked published on WordPress." Don't enable both plugins simultaneously.
+
+**Required Enhancements (still in progress)**:
+- Hide email templates related to OJS-native publication mechanics — versioning, issue publish notify, OA flip, broadcast announcements — but keep production/copyediting templates visible (they're in scope as proof coordination + copy editing)
+- Build the "Mark Published on WordPress" decision + custom mailable + public route blocker (post45Editorial Stage 5 action)
+- Remove DOI and citation management features (already hidden via existing plugin disables)
+- Hide issue management UI (already done via admin.css)
 
 #### 2. 🔄 Streamline Pragma Submissions Theme
 **Goal**: Simplified, enhanced user-facing submission experience

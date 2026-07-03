@@ -1,108 +1,124 @@
-# Email Templates Audit - Submissions Only Plugin
+# Email Templates Audit — post45Editorial Plugin
 
-## Currently HIDDEN (22 templates):
+**Plugin lineage:** Originally `submissionsOnly` (Oct 2025). Forked into `post45Editorial` (June 2026) when Post45 expanded OJS's scope to include copy editing AND post-copyedit proof coordination.
 
-### Publishing Workflow (5)
-1. ✅ DISCUSSION_NOTIFICATION_COPYEDITING
-2. ✅ DISCUSSION_NOTIFICATION_PRODUCTION
-3. ✅ EDITOR_DECISION_SEND_TO_PRODUCTION
-4. ✅ EDITOR_DECISION_BACK_FROM_PRODUCTION (Sent Back TO Copyediting from Production)
-5. ✅ EDITOR_DECISION_NEW_ROUND (New Version Created)
+**Scope as of June 2026:** Submit → Peer Review → Accept → Copy Edit → Proof Coordination → Mark Published on WordPress. All four OJS stages (1, 3, 4, 5) are in scope. Stage 5 is repurposed as proof coordination (not OJS-side typesetting). The terminal action is "Mark Published on WordPress" — custom decision added by the post45Editorial plugin.
 
-### Publication Notifications (4)
-6. ✅ ISSUE_PUBLISH_NOTIFY
-7. ✅ OPEN_ACCESS_NOTIFY
-8. ✅ ANNOUNCEMENT
-9. ✅ VERSION_CREATED (Publication version created — production workflow)
+## Currently HIDDEN (16 templates):
 
-### Payment/Subscription (9)
-10. ✅ PAYMENT_REQUEST_NOTIFICATION
-11. ✅ SUBSCRIPTION_PURCHASE_INDL
-12. ✅ SUBSCRIPTION_PURCHASE_INSTL
-13. ✅ SUBSCRIPTION_RENEW_INDL
-14. ✅ SUBSCRIPTION_RENEW_INSTL
-15. ✅ SUBSCRIPTION_NOTIFY
-16. ✅ SUBSCRIPTION_BEFORE_EXPIRY
-17. ✅ SUBSCRIPTION_AFTER_EXPIRY
-18. ✅ SUBSCRIPTION_AFTER_EXPIRY_LAST
+### OJS Publication Mechanics (4)
+Post45 marks published externally via the post45Editorial action. OJS's native versioning/issue-publish/OA flip mechanisms are unused.
+
+1. ✅ EDITOR_DECISION_NEW_ROUND ("New Version Created") — no versioning
+2. ✅ VERSION_CREATED — no versioning
+3. ✅ ISSUE_PUBLISH_NOTIFY — no issues (continuous publication on WordPress)
+4. ✅ OPEN_ACCESS_NOTIFY — Post45 is OA from day one; no embargo flip
+
+### Broadcast / Announcement (1)
+5. ✅ ANNOUNCEMENT — Post45 uses Mailchimp/Mailerlite for journal-wide announcements
+
+### Payment / Subscription (9)
+Post45 is free and open — no payment or subscription flows.
+
+6. ✅ PAYMENT_REQUEST_NOTIFICATION
+7. ✅ SUBSCRIPTION_PURCHASE_INDL
+8. ✅ SUBSCRIPTION_PURCHASE_INSTL
+9. ✅ SUBSCRIPTION_RENEW_INDL
+10. ✅ SUBSCRIPTION_RENEW_INSTL
+11. ✅ SUBSCRIPTION_NOTIFY
+12. ✅ SUBSCRIPTION_BEFORE_EXPIRY
+13. ✅ SUBSCRIPTION_AFTER_EXPIRY
+14. ✅ SUBSCRIPTION_AFTER_EXPIRY_LAST
 
 ### ORCID (3)
-19. ✅ ORCID_COLLECT_AUTHOR_ID
-20. ✅ ORCID_REQUEST_AUTHOR_AUTHORIZATION
-21. ✅ ORCID_REQUEST_UPDATE_SCOPE
+Post45 doesn't use ORCID integration.
+
+15. ✅ ORCID_COLLECT_AUTHOR_ID
+16. ✅ ORCID_REQUEST_AUTHOR_AUTHORIZATION
+17. ✅ ORCID_REQUEST_UPDATE_SCOPE
 
 ### Masthead (1, added in OJS 3.5.0-4)
-22. ✅ USER_ROLE_MASTHEAD_UPDATE (User Role Masthead Visibility Update Notification — Post45 doesn't expose a public masthead)
+18. ✅ USER_ROLE_MASTHEAD_UPDATE — Post45 doesn't expose a public masthead
+
+(Numbering above is 1–18, not 1–16; the count "16" reflects the trimmed list now that copy editing + production templates are back in scope.)
+
+### Group Filters (Manage Emails sidebar)
+- **None excluded** — all four workflow-stage group filters (Submission / Review / Copyediting / Production) are in scope as of June 2026
+
+## Changes from previous version (Oct 2025 → June 2026):
+
+**Now SHOWN (previously hidden):**
+- `DISCUSSION_NOTIFICATION_COPYEDITING` — copy editing in scope
+- `DISCUSSION_NOTIFICATION_PRODUCTION` — Stage 5 used for proof coordination
+- `EDITOR_DECISION_SEND_TO_PRODUCTION` — used to move accepted+copyedited submission into proof coordination
+- `EDITOR_DECISION_BACK_FROM_PRODUCTION` — used to return to copy editing when proof review surfaces issues
+- "Copyediting" group filter
+- "Production" group filter
 
 ---
 
-## Currently SHOWN (should review - 45 templates):
+## Currently SHOWN (key categories):
 
-### ✅ KEEP - Submission Stage (5)
-- SUBMISSION_ACK - Author receives when submission created
-- SUBMISSION_ACK_NOT_USER - Non-user co-author notification
-- SUBMISSION_NEEDS_EDITOR - Alert when submission needs editor assigned
-- SUBMISSION_SAVED_FOR_LATER - Incomplete submission saved
-- DISCUSSION_NOTIFICATION_SUBMISSION - Discussion in submission stage
+### ✅ KEEP — Submission Stage
+- SUBMISSION_ACK
+- SUBMISSION_ACK_NOT_USER
+- SUBMISSION_NEEDS_EDITOR
+- SUBMISSION_SAVED_FOR_LATER
+- DISCUSSION_NOTIFICATION_SUBMISSION
 
-### ✅ KEEP - Review Stage (14)
-- REVIEW_REQUEST - Invite reviewer
-- REVIEW_REQUEST_SUBSEQUENT - Invite reviewer for subsequent round
-- REVIEW_RESEND_REQUEST - Resend reviewer invitation
-- REVIEW_CONFIRM - Reviewer accepts
-- REVIEW_DECLINE - Reviewer declines
-- REVIEW_CANCEL - Editor cancels review request
-- REVIEW_REINSTATE - Reinstate cancelled reviewer
-- REVIEW_REMIND - Manual reminder to reviewer
-- REVIEW_REMIND_AUTO - Auto reminder to reviewer
-- REVIEW_RESPONSE_OVERDUE_AUTO - Auto reminder when overdue
-- REVIEW_ACK - Acknowledge completed review
-- REVIEW_COMPLETE - Notify author review is complete
-- REVIEW_EDIT - Notify reviewer of edited review
-- DISCUSSION_NOTIFICATION_REVIEW - Discussion in review stage
+### ✅ KEEP — Review Stage
+- REVIEW_REQUEST, REVIEW_REQUEST_SUBSEQUENT, REVIEW_RESEND_REQUEST
+- REVIEW_CONFIRM, REVIEW_DECLINE, REVIEW_CANCEL, REVIEW_REINSTATE
+- REVIEW_REMIND, REVIEW_REMIND_AUTO, REVIEW_RESPONSE_OVERDUE_AUTO
+- REVIEW_ACK, REVIEW_COMPLETE, REVIEW_EDIT
+- DISCUSSION_NOTIFICATION_REVIEW
 
-### ✅ KEEP - Editorial Decisions (12)
-- EDITOR_ASSIGN - Assign editor to submission
-- EDITOR_DECISION_ACCEPT - Accept submission (moves to Copyediting = our "Accepted")
-- EDITOR_DECISION_BACK_FROM_COPYEDITING - **Sent Back FROM Copyediting to Review (Cancel Acceptance)**
-- EDITOR_DECISION_DECLINE - Decline submission
-- EDITOR_DECISION_INITIAL_DECLINE - Decline without review
-- EDITOR_DECISION_REVERT_DECLINE - Revert decline decision
-- EDITOR_DECISION_REVERT_INITIAL_DECLINE - Revert initial decline
-- EDITOR_DECISION_REVISIONS - Request revisions
-- EDITOR_DECISION_RESUBMIT - Request resubmission
-- EDITOR_DECISION_SEND_TO_EXTERNAL - Send to external review
-- EDITOR_DECISION_SKIP_REVIEW - Skip review stage
-- EDITOR_DECISION_CANCEL_REVIEW_ROUND - Cancel review round
+### ✅ KEEP — Editorial Decisions
+- EDITOR_ASSIGN
+- EDITOR_DECISION_ACCEPT (moves to Copy Editing)
+- EDITOR_DECISION_BACK_FROM_COPYEDITING ("Cancel Acceptance" — back to Review)
+- EDITOR_DECISION_DECLINE
+- EDITOR_DECISION_INITIAL_DECLINE
+- EDITOR_DECISION_REVERT_DECLINE
+- EDITOR_DECISION_REVERT_INITIAL_DECLINE
+- EDITOR_DECISION_REVISIONS, EDITOR_DECISION_RESUBMIT
+- EDITOR_DECISION_SEND_TO_EXTERNAL, EDITOR_DECISION_SKIP_REVIEW
+- EDITOR_DECISION_CANCEL_REVIEW_ROUND
 
-### ✅ KEEP - Editor/Reviewer Management (4)
-- EDITOR_RECOMMENDATION - Section editor recommendation to editor
-- EDITORIAL_REMINDER - Reminder for editorial tasks
-- REVIEWER_REGISTER - Welcome email for new reviewer
-- EDITOR_DECISION_NOTIFY_REVIEWERS - Notify reviewers of decision
+### ✅ KEEP — Copy Editing
+- DISCUSSION_NOTIFICATION_COPYEDITING
 
-### ✅ KEEP - User Management (6)
-- USER_REGISTER - Welcome new user
-- USER_VALIDATE_CONTEXT - Validate user email (journal level)
-- USER_VALIDATE_SITE - Validate user email (site level)
-- USER_ROLE_ASSIGNMENT_INVITATION - Invite user to role
-- USER_ROLE_END - Notify user role ended
-- CHANGE_EMAIL - Confirm email change
+### ✅ KEEP — Proof Coordination (Production stage, repurposed)
+- DISCUSSION_NOTIFICATION_PRODUCTION
+- EDITOR_DECISION_SEND_TO_PRODUCTION (rebranded by Post45's draft: "Sending Article to Proofs")
+- EDITOR_DECISION_BACK_FROM_PRODUCTION
 
-### ✅ KEEP - Password/Security (1)
-- PASSWORD_RESET_CONFIRM - Password reset
+### ✅ KEEP — Editor/Reviewer Management
+- EDITOR_RECOMMENDATION, EDITORIAL_REMINDER
+- REVIEWER_REGISTER, EDITOR_DECISION_NOTIFY_REVIEWERS
 
-### ✅ KEEP - Author Notifications (2)
-- EDITOR_DECISION_NOTIFY_OTHER_AUTHORS - Notify co-authors of decision
-- REVISED_VERSION_NOTIFY - Notify editors of revised submission
+### ✅ KEEP — User Management
+- USER_REGISTER, USER_VALIDATE_CONTEXT, USER_VALIDATE_SITE
+- USER_ROLE_ASSIGNMENT_INVITATION, USER_ROLE_END
+- CHANGE_EMAIL
 
-### ❓ REVIEW - Potentially Hide (2)
-- STATISTICS_REPORT_NOTIFICATION - Statistics report emails (do you use this?)
-- VERSION_CREATED - Version created notification (related to versioning/publication?)
+### ✅ KEEP — Password/Security
+- PASSWORD_RESET_CONFIRM
+
+### ✅ KEEP — Author Notifications
+- EDITOR_DECISION_NOTIFY_OTHER_AUTHORS
+- REVISED_VERSION_NOTIFY
+
+### 🆕 NEW (added by post45Editorial)
+- `EDITOR_DECISION_MARK_PUBLISHED` — "Your article is now live" — sent by the Mark Published on WordPress action with `{$publicationUrl}` as a custom variable
+
+### ❓ REVIEW — Potentially Hide (1)
+- STATISTICS_REPORT_NOTIFICATION — open question: do you use OJS's automated statistics reports?
 
 ---
 
-## Summary:
-- **Currently Hidden**: 22 templates
-- **Open question**: STATISTICS_REPORT_NOTIFICATION — do you use automated statistics reports, or handle externally? Hide if not used.
-- **Correctly Shown**: ~43 templates (all submission/review workflow related)
+## Summary
+
+- **Currently Hidden**: 16 templates (down from 22 in the submissionsOnly era)
+- **New in post45Editorial**: 1 custom mailable (`EDITOR_DECISION_MARK_PUBLISHED`)
+- **Open question**: STATISTICS_REPORT_NOTIFICATION — hide if Post45 doesn't use it
