@@ -32,6 +32,47 @@
 
 ## Pending Tasks ⏳
 
+### post45Editorial plugin: "Mark Published on WordPress" — ✅ BUILT & TESTED (July 2026)
+
+The custom Stage 5 decision + supporting pieces are implemented and verified.
+Programmatic end-to-end test (`scratchpad/` during the session; logic lives in the
+plugin) passed 18/18: decision registration, publish flow, double-run guard,
+post-publish URL edit field, mailable variable, and the public-view 404 blocker.
+
+Two real bugs were caught by *running* it (both fixed):
+1. **Issue-less publish crashed.** `Repo::publication()->publish()` →
+   `setStatusOnPublish()` calls `Repo::issue()->get($issueId)` as its first line;
+   `get()` requires a non-null int, so a null `issueId` fatals before the "no
+   issue" branch. `MarkPublished` now publishes manually (sets STATUS_PUBLISHED +
+   datePublished, recomputes submission status) instead of calling `publish()`.
+2. **`Form::config::before` hook signature.** That hook is dispatched via
+   `Hook::run` (spreads args), so the form arrives as the 2nd param directly, not
+   in an array. `PublicationFormHook` signature corrected.
+
+Also note: OJS core already blocks any decision on an already-published submission
+at the controller (`api.decisions.403.alreadyPublished`), so our `validate()`
+guard is belt-and-suspenders (friendlier message + covers non-API paths).
+
+**Frontend built & browser-tested (2026-07-06), committed.** Redesigned to metadata-first
+(URL entered in the Production panel before the decision; see `OJS-DEV-NOTES.md` +
+`CHANGELOG.md`). Button renders/disables correctly, URL saves + repopulates, nav trimmed,
+notification box gone. `PublicationFormHook` removed (URL single-homed in Production).
+
+**Remaining before fully shipped:**
+- **Hide the Title & Abstract machinery** — Unpublish, Create New Version, the red
+  "version has been published" warning (find the PublicationConfig source before touching).
+- **View button → the WordPress URL** for published articles; hide **Preview** pre-publish.
+- **Assign-participant email templates** (Assign Editor / Galleys Complete / Ready for
+  Production) reference OJS galleys + "Schedule for Publication" — revise or hide.
+- **`NotifyProofsReady`** — 2nd Production decision + its own email template (not started;
+  may warrant a fresh session).
+- **Open design Q:** published submissions now land on the Production tab — revisit if there's
+  a better default.
+- **Deploy to prod:** commit is done in both repos; still need to `git pull` on prod, install
+  the plugin version + enable for the context
+  (`php lib/pkp/tools/installPluginVersion.php plugins/generic/post45Editorial/version.xml`),
+  and rebuild if needed. NOT yet done.
+
 ### Scope Expansion: Extend OJS to Cover Copy Editing
 
 **Decision (June 2026):** OJS will now handle submissions, peer review, AND copy editing. Only proofs and publication move to WordPress. Previously OJS stopped at acceptance and post-acceptance work happened in Notion.
@@ -148,7 +189,10 @@
 
 **Plugins (maintained in monorepo)**:
 - `/plugins/themes/pragmaSubmissions/` - Frontend theme
-- `/plugins/generic/submissionsOnly/` - Admin interface modifications
+- `/plugins/generic/post45Editorial/` - Active editorial-scope plugin (email
+  filtering, "Mark Published on WordPress" decision, public-view blocker). Forked
+  from submissionsOnly (June 2026).
+- `/plugins/generic/submissionsOnly/` - Predecessor, kept disabled as backup
 - `/plugins/generic/colorPalettes/` - Color picker for themes
 
 **Config**:
