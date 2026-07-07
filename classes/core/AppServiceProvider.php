@@ -33,6 +33,21 @@ class AppServiceProvider extends \PKP\core\AppServiceProvider
 
         $this->app->bind(Request::class, PKPRequest::class);
 
+        // Bind the log ContextLogProcessor contract to its concrete implementation.
+        // Laravel's LogManager::get() resolves this contract when building ANY log
+        // channel's logger, but the binding is normally registered by Laravel's
+        // Illuminate\Log\Context\ContextServiceProvider — which OJS's hand-built
+        // container does not load. Without it, resolving a log channel throws a
+        // BindingResolutionException, the emergency-logger fallback then dies on the
+        // undefined PKPContainer::storagePath(), and the request 500s. This surfaces
+        // most visibly with the `log` mailer ([email] default = log), which resolves
+        // a log channel when rendering an editorial decision's email step.
+        // See: pkp-lib LogManager.php / ContextServiceProvider.php.
+        $this->app->bind(
+            \Illuminate\Contracts\Log\ContextLogProcessor::class,
+            \Illuminate\Log\Context\ContextLogProcessor::class
+        );
+
         // Navigation Menu service
         $this->app->singleton('navigationMenu', fn ($app) => new NavigationMenuService());
 
