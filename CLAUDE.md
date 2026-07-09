@@ -38,6 +38,7 @@ the reference / existing pattern.
 |---|---|
 | Adding/changing an editorial **decision** or workflow action | existing `post45Editorial` decisions + `PLUGIN-IMPLEMENTATION-REFERENCE.md` + `OJS-DEV-NOTES.md` |
 | Adding/altering a **workflow button / admin UI** | `lib/ui-library/src/pages/workflow/` (live source) + `PLUGIN-IMPLEMENTATION-REFERENCE.md` |
+| Writing any **Vue / Pinia / composable / plugin-integration** code for OJS admin | `lib/ui-library/src/docs/guide/*.mdx` — start with `Plugins/Plugins`, `PageArchitecture`, `PiniaStores`, `CompositionAPI`, `APIInteractions` |
 | Needing an exact **hook name/signature** | `docs/dev/guide/hooks.rst` (regen: `php lib/pkp/tools/getHooks.php -r`) — the answer key |
 | Working on **theme / templates / CSS** | the Pragma parent theme + existing `.tpl` overrides in `pragmaSubmissions` |
 | Hitting a **gotcha / needing the headless-test recipe** | `OJS-DEV-NOTES.md` |

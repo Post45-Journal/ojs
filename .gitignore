@@ -27,6 +27,7 @@ registry/uiLocaleKeysBackend.json
 /plugins/generic/submissionsOnly
 /plugins/generic/mailgun
 /plugins/generic/post45Editorial
+/plugins/generic/post45Cfp
 /plugins/themes/pragmaSubmissions
 
 # TinyMCE asset symlinks (created by scripts/post-update-assets.sh)
