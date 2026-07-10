@@ -11,7 +11,7 @@
   *
   -->
 
-<install version="3.5.0.4">
+<install version="3.5.0.5">
 	<code function="checkPhpVersion" />
 
 	<upgrade minversion="2.0.0.0" maxversion="3.2.9.9">
@@ -174,16 +174,21 @@
 		<migration class="APP\migration\upgrade\v3_5_0\I10659_UpdateCrossrefSchema"/>
 		<migration class="APP\migration\upgrade\v3_5_0\I11125_UpdateEmailTemplateVariables"/>
 		<migration class="PKP\migration\upgrade\v3_5_0\I10962_UpdateEmailTemplateVariables"/>
+		<migration class="PKP\migration\upgrade\v3_5_0\I12133_FixCategorySort"/>
 		<code function="downloadIPGeoDB" />
 		<note file="docs/release-notes/README-3.5.0" />
 	</upgrade>
 
-	<upgrade minversion="3.5.0.0" maxversion="3.5.0.9">
+	<upgrade minversion="3.5.0.0" maxversion="3.5.0.99">
 		<migration class="PKP\migration\upgrade\v3_5_0\I10962_UpdateEmailTemplateVariables"/>
 		<migration class="PKP\migration\upgrade\v3_5_0\I11603_AddMissingUserRoleAssignmentInvitationEmail"/>
 		<migration class="PKP\migration\upgrade\v3_5_0\I11673_AddMissingApprovalToReviewerSuggestion"/>
 		<migration class="APP\migration\upgrade\v3_5_0\I12357_FixDecisionConstantsMissedStageId"/>
 		<migration class="PKP\migration\upgrade\v3_5_0\I11800_AddUserRoleMastheadUpdateEmail"/>
+		<migration class="PKP\migration\upgrade\v3_5_0\I12608_RestoreActiveReviewerInvitations"/>
+		<migration class="PKP\migration\upgrade\v3_5_0\I12513_MissingSiteLocaleUserNames"/>
+		<migration class="PKP\migration\upgrade\v3_5_0\I12133_FixCategorySort"/>
+		<migration class="PKP\migration\upgrade\v3_5_0\I12792_FixInvitationEmailButtons"/>
 	</upgrade>
 
 	<!-- update plugin configuration - should be done as the final upgrade task -->
