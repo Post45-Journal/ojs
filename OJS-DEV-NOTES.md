@@ -264,3 +264,18 @@ def)` then reference by name string in an item's `component`.
   `ArticleViewHook`'s intentional `NotFoundHttpException` still renders as a proper 404.
 - **Removed** `PublicationFormHook` (post-publish URL correction) — the Production field is the
   single URL home (it shows post-publish too, since the active stage stays Production).
+
+---
+
+## Latent surfaces to watch on future changes
+
+Not user-visible today, but if a related feature is later added they will start rendering hidden
+concepts. Log here so the next audit doesn't have to rediscover them.
+
+- **`IssueEntryForm` still ships `issueId` + `categoryIds` fields** ([classes/components/forms/publication/IssueEntryForm.php](classes/components/forms/publication/IssueEntryForm.php)).
+  The form is registered as a Vue component on every workflow page ([pages/workflow/WorkflowHandler.php:84-100](pages/workflow/WorkflowHandler.php#L84-L100))
+  but is not reachable via the trimmed publication nav (`publication-nav.js` drops the Issue
+  tab that mounts it). If a future change re-adds the Issue tab — or wires a different mount
+  point for FORM_ISSUE_ENTRY — the Issue-picker + Categories-picker start rendering. Consider
+  either stripping the fields via `Form::config::before` on IssueEntryForm, or (better) not
+  re-adding the Issue tab.
