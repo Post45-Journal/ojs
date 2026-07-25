@@ -90,6 +90,15 @@ NODE_OPTIONS=--max-old-space-size=1536 npm run build
 sudo systemctl restart apache2
 ```
 
+**Post-upgrade sanity re-checks** (things that ride on pkp-lib internals and won't
+error loudly if upstream shifts underneath them — worth a grep before pushing):
+- Grep `plugins/generic/post45Editorial/classes/hook/` for docblocks containing
+  `ON OJS UPGRADE`. Each match lists the pkp-lib symbol/behavior it relies on;
+  confirm each still holds. Current entries:
+  - `RewriteAnonymizedDownloadFilename` — depends on `File::download` hook
+    signature + FileApiHandler's anonymized-filename guard + the router
+    handler's authorized-context access pattern.
+
 **Prod-specific quirks:**
 - The 1GB droplet OOMs during Vite builds without help: 1GB swap at `/swapfile` (persistent via
   `/etc/fstab`) + `NODE_OPTIONS=--max-old-space-size=1536` on every build. Consider a 2GB droplet.
