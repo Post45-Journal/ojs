@@ -56,6 +56,39 @@ Do **not** reverse-engineer these from source — read the reference and cite it
   submission email log; none are actually sent. Local `php -S` logs → `/tmp/ojs-server.log`
   (confirm the path via `/proc/<pid>/fd/2`).
 
+### phpunit for plugin tests
+
+The full test-infra plan lives in the `test_infrastructure_plan` memory. Recipe:
+
+- **phpunit binary:** `lib/pkp/lib/vendor/phpunit/phpunit/phpunit` — only present after
+  `cd lib/pkp && composer install` (a dev install, since prod runs `--no-dev`). `lib/vendor`
+  is gitignored in the pkp-lib submodule, so this is a local, reversible action.
+- **Runner:** `bash lib/pkp/tools/runAllTests.sh -p` for ApplicationPlugins,
+  `-C` for LibraryClasses, no flags = all suites. Must be invoked from the OJS repo root
+  (the internal phpunit invocation uses paths relative to it).
+- **Auto-discovery glob:** `plugins/*/*/tests/*Test.php` in [lib/pkp/tests/phpunit.xml](lib/pkp/tests/phpunit.xml)
+  (`ApplicationPlugins` testsuite). The glob resolves through symlinks, so plugin tests live
+  in the monorepo at `plugins/<pluginName>/tests/` and are picked up under the OJS repo's
+  `plugins/generic/<pluginName>/tests/` symlink target automatically.
+- **Test namespace:** `APP\plugins\<category>\<pluginDir>\tests` — e.g.
+  `APP\plugins\generic\post45Editorial\tests`. Match the physical path.
+- **Pick the right base class:** `PHPUnit\Framework\TestCase` for pure functions (no DB, no
+  OJS globals); `PKPTestCase` when you need registry/DAO backup + Mockery to stub OJS repos;
+  `PKP\tests\DatabaseTestCase` for integration tests hitting a real DB (isolation via
+  `getAffectedTables()` or `PKP_TEST_ENTIRE_DB`).
+- **PHPUnit 11 attributes:** `#[DataProvider('provider')]` and `#[CoversClass(FooClass::class)]`
+  are the modern form (the `@dataProvider` docblock still works but is deprecated). Mirror
+  the OAIMetadataFormat_DC plugin test.
+- **Baseline flakes to ignore:**
+  - `beStrictAboutOutputDuringTests="true"` in the phpunit config turns any test that
+    `echo`s or dumps a stack trace into a warning/failure. Some existing PKP tests
+    (`PluginTest::testFailToInstantiate`, `XMLTypeDescriptionTest`) trip this — noise, not
+    signal.
+  - `FilterDAOTest::testFilterCrud` / `testCompositeFilterCrud` (LibraryClasses) fail with
+    UniqueConstraintViolation against a dirty local dev DB. Expected outside CI.
+  - `jatsTemplate/ArticleBodyTest` (ApplicationPlugins) errors on a missing submission file
+    fixture. Expected without a clean fixture DB.
+
 ---
 
 ## Hard-won gotchas (OJS 3.5.0-4)
