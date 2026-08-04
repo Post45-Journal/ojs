@@ -88,6 +88,71 @@ The full test-infra plan lives in the `test_infrastructure_plan` memory. Recipe:
     UniqueConstraintViolation against a dirty local dev DB. Expected outside CI.
   - `jatsTemplate/ArticleBodyTest` (ApplicationPlugins) errors on a missing submission file
     fixture. Expected without a clean fixture DB.
+- **Pass `--no-coverage` if no pcov/xdebug is installed.** The phpunit.xml declares a
+  `<coverage>` section; under PHPUnit 11 the "No coverage driver available" warning
+  is a nonzero-exit condition. CI passes `--no-coverage` in
+  [.github/workflows/plugin-tests.yml](.github/workflows/plugin-tests.yml); do the
+  same locally unless you actually want coverage reports.
+
+### PKPTestCase + Mockery gotchas
+
+Discovered while writing the post45Editorial mockable-tier tests (2026-08-04).
+Each of these bit at least once — expect them, don't rediscover.
+
+- **`method_exists` returns false for methods handled by Mockery `__call`.** Bare
+  `Mockery::mock()` (no class arg) answers method calls through `__call`, so guards
+  like `method_exists($arg, 'getData')` skip your mock. Fix: mock a real class
+  (`Mockery::mock(SomeClass::class)`) or use an anonymous class stub with the actual
+  method defined. See `ArticleViewHookTest::publicationWithUrl` for the anonymous-class
+  pattern.
+- **PHP typed return values require typed Mockery mocks.** If the SUT calls
+  `Application::get()->getRequest()` and `getRequest()` is declared `: Request`, then
+  `Mockery::mock()` (untyped) triggers a TypeError. Always pass the concrete class:
+  `Mockery::mock(\APP\core\Request::class)`. Same for `PluginRegistry::getPlugin()`
+  (`: ?Plugin`), `Application::get()` (`: self`), `Request::getContext()`
+  (`: ?APP\journal\Journal` — note it's Journal, not Context, in the OJS override).
+- **`Registry::set($key, &$value)` takes value by reference.** Passing an inline
+  array literal (`Registry::set('plugins', [...])`) errors with "could not be passed
+  by reference." Assign to a variable first: `$plugins = [...]; Registry::set('plugins', $plugins);`.
+- **PKPTestCase provides two auto-restoring backup channels.** Prefer both over
+  `#[RunTestsInSeparateProcesses]` — they're faster and cache-friendlier.
+  - `getMockedContainerKeys()` → array of class-strings. Backs up + restores
+    Laravel container bindings. Use for `Repo::foo()` (which resolve to
+    `app(FooRepository::class)`) — swap the binding via `app()->instance(...)`
+    inside your test. See `InjectAuthorCommentsForEditorsInjectTest`,
+    `MetadataFormSectionFieldTest`.
+  - `getMockedRegistryKeys()` → array of PKP `Registry` keys. Backs up + restores
+    entries like `'application'`, `'request'`, `'plugins'`. Use for PKP static
+    lookups (`PluginRegistry::getPlugin`, `Application::get()`). See
+    `PrimarySectionAwareGridHandlerTest`, `HideEditorialMastheadHookTest`.
+- **`parent::` seam workaround.** `parent::method(...)` is compile-time bound —
+  can't be intercepted. For a Repository override where the SUT calls
+  `parent::summarizeMailable(...)`, the cleanest test is to let the real parent
+  run against a mocked `Application → Request → Dispatcher → Context` chain
+  (10-line setup in a helper). See `Post45MailableRepositoryTest::mockApplicationChain`.
+  Alternatives (SUT refactor to a `callParent()` seam, mocking `parent::` via
+  runkit, or duplicating the SUT in a subclass) are all worse.
+- **Plain `PHPUnit\Framework\TestCase` needs manual `Mockery::close()`.** PKPTestCase
+  does it in its tearDown; when you extend `TestCase` directly (for pure-unit + a
+  little Mockery), add `Mockery::close()` in your own tearDown or expectations
+  leak between tests.
+- **Instantiating heavy FormComponents.** `PKPMetadataForm`, `PKPMastheadForm`,
+  `Post45EditorialSettingsForm` etc. have constructors that pull in ControlledVocab
+  wiring, `Locale::getCountries()`, or template resource loading — all irrelevant
+  to a "does this method mutate the form correctly?" test. Use
+  `(new ReflectionClass(FormClass::class))->newInstanceWithoutConstructor()` and
+  then set the typed public properties directly (`$form->context = new Journal()`,
+  `$form->publication = new Publication()`). Both are DataObjects and cheap to
+  instantiate. Same pattern already used for `Post45SubmissionFileRepository`.
+- **PHPUnit 11 flags "risky" tests with no assertions.** Mockery `->once()`
+  expectations satisfy Mockery but don't count as PHPUnit assertions — the test
+  shows as ⚠. Either add an explicit `self::assert*` after the SUT call, or use a
+  capture pattern (`Mockery::on(fn ($x) => ...)` writing to an outer variable, then
+  assert on the capture) — see `Post45EditorialSettingsFormTest::pluginCapturingUpdate`.
+- **Test-only concrete subclasses of abstract classes.** OK to co-locate in the
+  test file (see `DummyDecisionType` in `HideResubmitDecisionTest`), but only
+  implement the **abstract** methods. Overriding non-abstract parent methods
+  risks signature drift across PHP or PKP versions.
 
 ---
 
