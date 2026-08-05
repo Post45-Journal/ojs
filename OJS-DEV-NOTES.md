@@ -125,14 +125,28 @@ Discovered while landing the first integration test (`MarkPublishedTest`,
   `plugins/generic/post45Editorial/tests/support/DockerDatabaseTestCase`
   instead of `PKP\tests\DatabaseTestCase`. It duplicates DatabaseTestCase's
   tiny setUp/tearDown logic and pipes the restore through `docker exec mysql`.
-  Table-scoped isolation (`getAffectedTables()` returning an array) uses
-  SQL against the live connection with no shell-out, so it works unchanged
-  on both docker-local and CI.
-- **Fixture DB dump lives at `<repo>/database.sql.gz`** (gitignored). The
-  path matches PHPUnit's default `DATABASEDUMP` env var declared in
-  [lib/pkp/tests/phpunit.xml](lib/pkp/tests/phpunit.xml). Regenerate via
-  [tools/dev/dump-test-db.sh](tools/dev/dump-test-db.sh) after re-seeding
-  `ojs_test`.
+  On CI (`CI=true` env var set by GitHub Actions, or `command -v docker`
+  fails), the same class delegates to `PKPTestHelper::restoreDB()` so the
+  native `/usr/bin/mysql` path is used — no plugin code changes needed
+  between environments. Table-scoped isolation (`getAffectedTables()`
+  returning an array) uses SQL against the live connection with no
+  shell-out, so it works unchanged everywhere.
+- **Two fixture DB dumps.** The local run consumes `<repo>/database.sql.gz`
+  (gitignored, full clone of dev DB, ~11MB gzipped). The CI run consumes
+  the sanitized + trimmed variant at
+  [tests/fixtures/ci-database.sql.gz](tests/fixtures/ci-database.sql.gz)
+  (committed, ~60KB) — identity/free-text fields rewritten to synthetic
+  placeholders (IDs + FKs preserved so hardcoded test constants still
+  resolve), ROR-registry + session/log noise stripped. Regenerate:
+  - Local: `tools/dev/dump-test-db.sh` (full `ojs_test` → `database.sql.gz`).
+  - CI:    `tools/dev/dump-ci-fixture.sh` (clones `ojs_test` → scratch
+           `ojs_test_ci`, applies `tools/dev/sanitize-ci-fixture.sql`
+           against the scratch copy, then dumps the trimmed result).
+  Regenerate the CI fixture whenever a new integration test needs seed
+  data that isn't in `ojs_test`, or a plugin schema migration adds a
+  column. The DATABASEDUMP env var declared in
+  [lib/pkp/tests/phpunit.xml](lib/pkp/tests/phpunit.xml) defaults to
+  `database.sql.gz`; the CI workflow overrides it to the fixture path.
 - **Plugin registration required for schema-extension fields.** MarkPublished
   reads `$publication->getData('publicationUrl')`, which relies on the
   plugin's `SchemaHook` adding that field to the publication schema. Without
@@ -201,6 +215,59 @@ Discovered while landing the first integration test (`MarkPublishedTest`,
   Application::get()->getRequest()->getRouter()->setHandler($handler);
   ```
   Avoids the PKPAuthorizationDecisionManager wiring the real handler needs.
+- **`users` table can't go in `getAffectedTables()`.**
+  `PKPTestHelper::restoreTables()` `DELETE`s the table before re-inserting
+  the backup. `review_assignments.reviewer_id` FKs `users.user_id` with no
+  cascade, so the DELETE fails with a 1451 integrity-constraint violation
+  and tearDown aborts (leaving side effects behind for the next test —
+  cascading failures across the whole file). Two ways out:
+  1. Don't include `users`; save + restore only the specific bit you're
+     flipping (e.g. wrap the flip in a try/finally around the DB write).
+  2. Create + delete test users manually (insertGetId in setUp; targeted
+     deleteWhereIn in tearDown after `parent::tearDown` runs). FK-safe as
+     long as the test users are never referenced from review_assignments.
+     See `Post45CfpPageHandlerTest` for the fake-users pattern (phonetic
+     callsign families keep the sort test deterministic without exposing
+     real fixture-user names in the repo).
+- **Fake test-user helper** — when a test needs a user with a controlled
+  identity (family name for sort tests, disabled bit for filter tests),
+  don't reach for a fixture user id: the seeded ojs_test users are cloned
+  from the dev DB and shipping their real names into a test file (which
+  the repo carries into the public monorepo) is not great. Insert fresh:
+  ```php
+  private function createTestUser(string $username, string $given, string $family): int {
+      $id = DB::table('users')->insertGetId([
+          'username' => $username,
+          'email' => $username . '@example.test',
+          'password' => 'not-a-real-hash',
+          'locales' => '["en"]',
+          'date_registered' => (string) \PKP\core\Core::getCurrentDate(),
+          'disabled' => false,
+      ]);
+      DB::table('user_settings')->insert([
+          ['user_id' => $id, 'locale' => 'en', 'setting_name' => 'givenName',  'setting_value' => $given],
+          ['user_id' => $id, 'locale' => 'en', 'setting_name' => 'familyName', 'setting_value' => $family],
+      ]);
+      return (int) $id;
+  }
+  ```
+- **`aaron` fixture user (id 12) is `disabled=1` in `ojs_test`.** Any test
+  that assigns him and then expects the enabled-user filter to include him
+  will silently get 0 results. Applies to all tests written against the
+  seeded dev-DB clone. Use fake test users instead.
+- **`#[WithoutErrorHandler]` for tests that render Smarty in CLI.**
+  `parent::fetch()` on any PKP `Form` subclass renders the form template,
+  which trips E_WARNING / E_DEPRECATED in a CLI harness (missing
+  `FBV_wordCount`, `htmlspecialchars(null)`, etc). None of it is SUT code;
+  under PHPUnit 11's strict error handler these get converted to test
+  warnings. Add the attribute to the individual method:
+  ```php
+  #[WithoutErrorHandler]
+  public function testFetchAssignsExpectedTemplateVars(): void { ... }
+  ```
+  Anything the SUT `assign()`s before `parent::fetch()` is still readable
+  via `TemplateManager::getManager($request)->getTemplateVars(...)` in the
+  test — the render errors don't roll back the assign.
 
 ### PKPTestCase + Mockery gotchas
 
@@ -261,6 +328,27 @@ Each of these bit at least once — expect them, don't rediscover.
   test file (see `DummyDecisionType` in `HideResubmitDecisionTest`), but only
   implement the **abstract** methods. Overriding non-abstract parent methods
   risks signature drift across PHP or PKP versions.
+- **`PKPRequest::getSession()` has a typed return of
+  `Illuminate\Contracts\Session\Session`.** Bare `Mockery::mock()` (untyped)
+  returning null triggers a TypeError. Mock the interface + its `token()`
+  method for any test that constructs a `RemoteActionConfirmationModal`
+  (CSRF field builds off `session->token()`):
+  ```php
+  $session = Mockery::mock(\Illuminate\Contracts\Session\Session::class);
+  $session->shouldReceive('token')->andReturn('test-csrf-token');
+  $request->shouldReceive('getSession')->andReturn($session);
+  ```
+- **Parent `GridCellProvider::getCellActions` delegates to the column.**
+  A grid cell provider test that exercises the "column I don't own falls
+  through to parent" branch has to expect a `getCellActions()` call on the
+  column mock. Seed a sentinel and assert the SUT returns it verbatim —
+  that proves parent-delegation without asserting a particular default
+  shape that could change upstream:
+  ```php
+  $sentinel = ['column-owned-action'];
+  $column->shouldReceive('getCellActions')->andReturn($sentinel);
+  self::assertSame($sentinel, $provider->getCellActions(...));
+  ```
 
 ---
 

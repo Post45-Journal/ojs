@@ -41,4 +41,8 @@ registry/uiLocaleKeysBackend.json
 # Integration test infrastructure (per-environment; may contain credentials)
 /config.test.inc.php
 /tests-files/
+# Local (full, unsanitized) test DB dump — used by
+# tools/dev/run-integration-tests.sh. Gitignored because it's a clone of the
+# dev DB and carries real PII. The sanitized+trimmed CI variant at
+# tests/fixtures/ci-database.sql.gz IS committed (see dump-ci-fixture.sh).
 /database.sql.gz

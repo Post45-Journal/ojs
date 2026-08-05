@@ -14,6 +14,7 @@ on:
 
 jobs:
   phpunit:
+    name: unit + mockable
     runs-on: ubuntu-latest
     steps:
       - name: Checkout post45-ojs (recursive submodules)
@@ -29,8 +30,10 @@ jobs:
           path: .monorepo
           ref: ${{ inputs.monorepo_ref || 'main' }}
 
-      - name: Symlink post45Editorial into plugins/generic/
-        run: ln -s "$PWD/.monorepo/plugins/post45Editorial" plugins/generic/post45Editorial
+      - name: Symlink plugins into plugins/generic/
+        run: |
+          ln -s "$PWD/.monorepo/plugins/post45Editorial" plugins/generic/post45Editorial
+          ln -s "$PWD/.monorepo/plugins/post45Cfp"       plugins/generic/post45Cfp
 
       - name: Set up PHP 8.2
         uses: shivammathur/setup-php@v2
@@ -53,16 +56,127 @@ jobs:
         # coverage check entirely; we don't want coverage reports on every
         # push anyway.
         #
-        # --exclude-group integration: integration tests require a MySQL
-        # service + a seeded ojs_test schema + a config swap; that CI
-        # scaffolding isn't wired up yet. Skipped here; run locally via
-        # tools/dev/run-integration-tests.sh. When the CI DB service lands,
-        # add a second step that runs `--group integration` in its own
-        # PHPUnit process (running together in one process leaks plugin
-        # locale state and false-fails the pure-unit tier).
+        # --exclude-group integration: integration tests need a MySQL
+        # service + config swap; they run in the phpunit-integration job
+        # below. Splitting them into separate PHPUnit processes matters:
+        # integration setUp registers plugins, which globally loads their
+        # locale.po and false-fails pure-unit tests that assert on the raw
+        # `##locale-key##` fallback.
         run: |
           php lib/pkp/lib/vendor/phpunit/phpunit/phpunit \
             --configuration lib/pkp/tests/phpunit.xml \
             --no-coverage \
             --exclude-group integration \
-            plugins/generic/post45Editorial/tests
+            plugins/generic/post45Editorial/tests \
+            plugins/generic/post45Cfp/tests
+
+  phpunit-integration:
+    name: integration (MySQL)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ojs_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout post45-ojs (recursive submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Checkout ojs-plugins-monorepo
+        uses: actions/checkout@v4
+        with:
+          repository: Post45-Journal/ojs-plugins-monorepo
+          token: ${{ secrets.MONOREPO_READ_TOKEN }}
+          path: .monorepo
+          ref: ${{ inputs.monorepo_ref || 'main' }}
+
+      - name: Symlink plugins into plugins/generic/
+        run: |
+          ln -s "$PWD/.monorepo/plugins/post45Editorial" plugins/generic/post45Editorial
+          ln -s "$PWD/.monorepo/plugins/post45Cfp"       plugins/generic/post45Cfp
+
+      - name: Set up PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, xml, dom, curl, intl, zip, gd, mysql
+          coverage: none
+
+      - name: Install mysql-client (for /usr/bin/mysql restore path)
+        # PKPTestHelper::restoreDB() hardcodes /usr/bin/mysql. Ubuntu 24.04
+        # runners ship mysql-client preinstalled but we install explicitly
+        # so a future runner-image change doesn't silently break us.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mysql-client
+
+      - name: Wait for MySQL service to become ready
+        run: |
+          for i in {1..30}; do
+            if mysqladmin ping -h 127.0.0.1 -uroot -proot --silent; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL service did not become ready" >&2
+          exit 1
+
+      - name: Restore CI fixture into ojs_test
+        # PKPTestHelper::restoreDB replays this same dump between tests for
+        # PKP_TEST_ENTIRE_DB isolation; the initial pass here loads the
+        # schema + baseline seed data before the phpunit run starts.
+        env:
+          DATABASEDUMP: ${{ github.workspace }}/tests/fixtures/ci-database.sql.gz
+        run: |
+          zcat "$DATABASEDUMP" | mysql -h 127.0.0.1 -uroot -proot ojs_test
+          mysql -h 127.0.0.1 -uroot -proot -e "SELECT COUNT(*) AS submissions FROM submissions;" ojs_test
+
+      - name: Write OJS config pointing at the CI MySQL service
+        # No config swap needed in CI (there's no dev config to preserve);
+        # write config.inc.php directly, pointed at the service container +
+        # the just-restored ojs_test schema. Mirrors the shape of
+        # config.test.inc.php locally.
+        run: |
+          cp config.TEMPLATE.inc.php config.inc.php
+          # [general]
+          sed -i 's|^installed = .*|installed = On|' config.inc.php
+          sed -i 's|^base_url = .*|base_url = "http://127.0.0.1:8000"|' config.inc.php
+          sed -i 's|^app_key =.*|app_key = "base64:j9rjrp8odTtI58thRvPlYmrvD3/aRsAeeovYhxhdcwY="|' config.inc.php
+          # [database]
+          sed -i 's|^driver = .*|driver = mysqli|' config.inc.php
+          sed -i 's|^host = .*|host = "127.0.0.1"|' config.inc.php
+          sed -i 's|^username = ojs$|username = root|' config.inc.php
+          sed -i 's|^password = ojs$|password = root|' config.inc.php
+          sed -i 's|^name = ojs$|name = ojs_test|' config.inc.php
+          # Files dir (tests write here during file-bearing test setUp)
+          mkdir -p "${{ github.workspace }}/tests-files"
+          sed -i 's|^files_dir = .*|files_dir = "${{ github.workspace }}/tests-files"|' config.inc.php
+
+      - name: Install pkp-lib dev dependencies (phpunit)
+        working-directory: lib/pkp
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Run post45 plugin tests (integration tier only)
+        # DATABASEDUMP: what PKPTestHelper::restoreDB() reads between tests
+        # for PKP_TEST_ENTIRE_DB isolation. CI=true is set automatically by
+        # GitHub Actions and drives DockerDatabaseTestCase to skip its
+        # docker exec fallback and use the native /usr/bin/mysql path.
+        env:
+          DATABASEDUMP: ${{ github.workspace }}/tests/fixtures/ci-database.sql.gz
+        run: |
+          php lib/pkp/lib/vendor/phpunit/phpunit/phpunit \
+            --configuration lib/pkp/tests/phpunit.xml \
+            --no-coverage \
+            --testsuite ApplicationPlugins \
+            --group integration
