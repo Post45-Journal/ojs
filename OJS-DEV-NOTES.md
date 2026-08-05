@@ -94,6 +94,114 @@ The full test-infra plan lives in the `test_infrastructure_plan` memory. Recipe:
   [.github/workflows/plugin-tests.yml](.github/workflows/plugin-tests.yml); do the
   same locally unless you actually want coverage reports.
 
+### DatabaseTestCase local setup + gotchas
+
+Discovered while landing the first integration test (`MarkPublishedTest`,
+2026-08-04). This is the local recipe; CI setup is separate (see
+`test_infrastructure_plan` memory).
+
+- **Separate `ojs_test` MySQL schema.** Never point tests at the dev DB.
+  Bootstrap: `docker exec mysql sh -c 'mysqldump ... ojs | mysql ... ojs_test'`
+  seeds it from a clone of dev. Re-seed by rerunning the same command.
+- **`config.test.inc.php` (gitignored)** at the repo root — a copy of
+  `config.inc.php` with `database.name = ojs_test` and
+  `files_dir = <repo>/tests-files`. Same credentials otherwise, since dev
+  and test both point at the same docker MySQL.
+- **Config swap wrapper.** `PKPContainer::loadConfiguration()` reads
+  `Config::getVar('database', ...)` at Laravel-bootstrap time, so switching
+  the config file *after* Application::get() is instantiated (which is what
+  `PKPTestCase::setTestConfiguration()` does) does not rebind the DB
+  connection. Path of least resistance: swap `config.inc.php` ↔
+  `config.test.inc.php` around the whole phpunit run.
+  [tools/dev/run-integration-tests.sh](tools/dev/run-integration-tests.sh)
+  does this with a trap-based restore + a safety check that refuses to run
+  unless the test config's `database.name` contains `test`.
+  Same pattern `pkp/pkp-github-actions` uses in CI (`cp config.TEMPLATE.inc.php
+  config.inc.php`).
+- **`PKP_TEST_ENTIRE_DB` restore uses hardcoded `/usr/bin/mysql`.**
+  `PKPTestHelper::restoreDB()` shells out to `/usr/bin/mysql` directly. On
+  this WSL host, MySQL is inside a docker container (`mysql:8.0`) and no
+  host mysql client is installed. Workaround: extend
+  `plugins/generic/post45Editorial/tests/support/DockerDatabaseTestCase`
+  instead of `PKP\tests\DatabaseTestCase`. It duplicates DatabaseTestCase's
+  tiny setUp/tearDown logic and pipes the restore through `docker exec mysql`.
+  Table-scoped isolation (`getAffectedTables()` returning an array) uses
+  SQL against the live connection with no shell-out, so it works unchanged
+  on both docker-local and CI.
+- **Fixture DB dump lives at `<repo>/database.sql.gz`** (gitignored). The
+  path matches PHPUnit's default `DATABASEDUMP` env var declared in
+  [lib/pkp/tests/phpunit.xml](lib/pkp/tests/phpunit.xml). Regenerate via
+  [tools/dev/dump-test-db.sh](tools/dev/dump-test-db.sh) after re-seeding
+  `ojs_test`.
+- **Plugin registration required for schema-extension fields.** MarkPublished
+  reads `$publication->getData('publicationUrl')`, which relies on the
+  plugin's `SchemaHook` adding that field to the publication schema. Without
+  the plugin registered against the current context, PublicationDAO won't
+  hydrate the field from `publication_settings`, and re-fetched publications
+  return `null` even after we write the row. Register in `setUp()`:
+  ```php
+  PluginRegistry::loadCategory('generic', true, $contextId);
+  $plugin = PluginRegistry::getPlugin('generic', 'post45editorialplugin');
+  $plugin->register('generic', $plugin->getPluginPath(), $contextId);
+  ```
+- **CLI request has no router context.** Same gotcha as the
+  `tools/dev/repro-*.php` scripts: `Application::get()->getRequest()`
+  returns a request whose router has no context, and some Repo methods
+  dereference it. Set it in `setUp()`:
+  ```php
+  $router = new \PKP\core\PKPPageRouter();
+  $router->setApplication(Application::get());
+  (new \ReflectionProperty($router, '_context'))->setValue($router, $context);
+  Application::get()->getRequest()->setRouter($router);
+  ```
+  (In PHP 8.1+, `ReflectionProperty::setAccessible()` is deprecated — plain
+  `setValue()` works because properties are always accessible.)
+- **PKP_TEST_ENTIRE_DB is slow: ~10s/test.** Full dump-restore per test.
+  Fine for a few tests; profile-eating at scale. Switch each test to
+  `getAffectedTables()` (returning `['publications', 'publication_settings',
+  'submissions', 'event_log_settings', ...]`) once its touched-table set is
+  known. Table-scoped backup is SQL-only (fast, no shell-out).
+- **Plugin locale leaks across tests → integration + pure-unit tests must run
+  in separate PHPUnit processes.** An integration test's setUp calls
+  `$plugin->register($contextId)`, which loads the plugin's `locale.po`
+  globally for the rest of the PHP process. Pure-unit tests that hardcode
+  expected values against the pre-loaded fallback form
+  (`##plugins.generic.post45Editorial.foo##`) then false-fail because `__()`
+  starts resolving to real English strings. Solution:
+  - All integration tests carry `#[Group('integration')]`.
+  - `tools/dev/run-integration-tests.sh` passes `--group integration`.
+  - `.github/workflows/plugin-tests.yml` passes `--exclude-group integration`.
+  Under this split, unit tier + integration tier each run in their own
+  PHPUnit invocation and never share leaked plugin state.
+- **`PKPRequest::getUser()` caches by-ref through `Registry::get('user',
+  true, null)`.** First `getUser()` call in the process wins; subsequent
+  `getSessionGuard()->setUserId(...)` calls silently no-op. In tests that
+  switch identity across cases (e.g. reviewer / non-reviewer / logged out),
+  authenticate by writing directly to Registry rather than through the
+  session guard:
+  ```php
+  $user = Repo::user()->get($userId);
+  Registry::set('user', $user); // by-ref: needs a local variable, not literal
+  ```
+  and clear via `Registry::delete('user')` in setUp. See
+  `RewriteAnonymizedDownloadFilenameRewriteTest::authenticateAs`.
+- **Handler stubs for `getAuthorizedContextObject()`.** For tests that
+  exercise a hook reading authorization context off the request handler
+  (e.g. RewriteAnonymizedDownloadFilename), extend PKPHandler with an
+  anonymous class holding a public context map:
+  ```php
+  $handler = new class extends PKPHandler {
+      public array $ctx = [];
+      public function &getAuthorizedContextObject($assocType) {
+          $value = $this->ctx[$assocType] ?? null;
+          return $value;
+      }
+  };
+  $handler->ctx = [Application::ASSOC_TYPE_REVIEW_ASSIGNMENT => $ra, ...];
+  Application::get()->getRequest()->getRouter()->setHandler($handler);
+  ```
+  Avoids the PKPAuthorizationDecisionManager wiring the real handler needs.
+
 ### PKPTestCase + Mockery gotchas
 
 Discovered while writing the post45Editorial mockable-tier tests (2026-08-04).

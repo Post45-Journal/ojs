@@ -33,3 +33,8 @@ registry/uiLocaleKeysBackend.json
 # TinyMCE asset symlinks (created by scripts/post-update-assets.sh)
 /js/plugins/
 /js/skins/
+
+# Integration test infrastructure (per-environment; may contain credentials)
+/config.test.inc.php
+/tests-files/
+/database.sql.gz

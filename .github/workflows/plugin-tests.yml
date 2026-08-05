@@ -46,14 +46,23 @@ jobs:
         working-directory: lib/pkp
         run: composer install --prefer-dist --no-progress --no-interaction
 
-      - name: Run post45 plugin tests
+      - name: Run post45 plugin tests (unit + mockable tiers)
         # --no-coverage: phpunit.xml declares a <coverage> section, and
         # PHPUnit 11 exits nonzero on the "No coverage driver available"
         # warning when neither pcov nor xdebug is installed. Skip the
         # coverage check entirely; we don't want coverage reports on every
         # push anyway.
+        #
+        # --exclude-group integration: integration tests require a MySQL
+        # service + a seeded ojs_test schema + a config swap; that CI
+        # scaffolding isn't wired up yet. Skipped here; run locally via
+        # tools/dev/run-integration-tests.sh. When the CI DB service lands,
+        # add a second step that runs `--group integration` in its own
+        # PHPUnit process (running together in one process leaks plugin
+        # locale state and false-fails the pure-unit tier).
         run: |
           php lib/pkp/lib/vendor/phpunit/phpunit/phpunit \
             --configuration lib/pkp/tests/phpunit.xml \
             --no-coverage \
+            --exclude-group integration \
             plugins/generic/post45Editorial/tests
