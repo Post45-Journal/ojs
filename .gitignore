@@ -28,7 +28,11 @@ registry/uiLocaleKeysBackend.json
 /plugins/generic/mailgun
 /plugins/generic/post45Editorial
 /plugins/generic/post45Cfp
+/plugins/generic/smtpLocalDomain
 /plugins/themes/pragmaSubmissions
+
+# Claude Code local session state (per-user, per-machine)
+/.claude/
 
 # TinyMCE asset symlinks (created by scripts/post-update-assets.sh)
 /js/plugins/
