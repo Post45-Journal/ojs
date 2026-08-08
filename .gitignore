@@ -28,6 +28,7 @@ registry/uiLocaleKeysBackend.json
 /plugins/generic/mailgun
 /plugins/generic/post45Editorial
 /plugins/generic/post45Cfp
+/plugins/generic/post45NotionSync
 /plugins/generic/smtpLocalDomain
 /plugins/themes/pragmaSubmissions
 
