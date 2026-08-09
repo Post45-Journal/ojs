@@ -43,6 +43,21 @@ the reference / existing pattern.
 | Working on **theme / templates / CSS** | the Pragma parent theme + existing `.tpl` overrides in `pragmaSubmissions` |
 | Hitting a **gotcha / needing the headless-test recipe** | `OJS-DEV-NOTES.md` |
 | Wanting **past decisions / history** | `CHANGELOG.md` |
+| Touching anything an **editor operates by hand** | `EDITOR-NOTES.md` — and add to it, see below |
+
+## Editor-facing notes
+
+`EDITOR-NOTES.md` is a running cheat sheet for the editorial team: workflow
+sequences that take more steps than you'd guess, buttons whose names don't say
+what they do, and Post45 behaviour that differs from stock OJS. It becomes a
+Static Pages handbook on the journal site once it's substantial.
+
+**Capture as you go.** Whenever a session surfaces something an editor would
+have to figure out by trial — a non-obvious sequence, a hidden decision, a
+Post45 deviation from stock behaviour — append it while the detail is fresh.
+A rough stub under "To write up" beats a polished entry reconstructed months
+later. Mark entries ✅ verified / ⚠️ check in browser / 📝 to write up, and
+don't write confident UI instructions for screens you haven't actually seen.
 
 ## Deployment & Upgrade Workflow
 
