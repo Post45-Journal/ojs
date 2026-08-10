@@ -56,6 +56,31 @@ Do **not** reverse-engineer these from source — read the reference and cite it
   submission email log; none are actually sent. Local `php -S` logs → `/tmp/ojs-server.log`
   (confirm the path via `/proc/<pid>/fd/2`).
 
+### An empty `time_zone` silently breaks the dashboard's Days column
+
+If `config.inc.php` has `time_zone = ` (empty), the editorial dashboard renders
+with **one fewer cell per row than it has headers** — every column from Days
+rightwards is shifted one to the left, and Actions looks empty. The header row is
+unaffected, which makes it read like a CSS or column-config problem. It is
+neither.
+
+`PKPTemplateManager` emits `'timeZone' => Config::getVar('general', 'time_zone')`
+as `pkp.context.timeZone`. `getConfiguredTimezone()` in
+`lib/ui-library/src/utils/dateUtils.js` **throws** when that is falsy, and the
+throw happens inside the `days` computed of `DashboardCellSubmissionDays`, so the
+component never emits its `<td>`.
+
+Tells that point here rather than at your own code:
+- It reproduces on the editorial dashboard but not the author one — only the
+  editorial dashboard has a Days column.
+- Counting cells in DevTools shows the `<td>` **absent**, not hidden. Nothing has
+  `display: none`. (Remember the title cell is a `<th scope="row">`, so a healthy
+  row is 1 `th` + 5 `td` against 6 headers.)
+
+Stock `config.TEMPLATE.inc.php` ships `time_zone = "UTC"`, so this only happens
+where the value has been blanked by hand. Keep dev and prod on the same zone;
+a mismatch changes how every date renders between the two.
+
 ### Seeding reviewer assignments from a CLI tool
 
 `EditorAction::addReviewer()` is the native "assign a reviewer" call (the Add
