@@ -84,6 +84,18 @@ Topics we know are worth an entry. Add detail when someone next walks the path.
   Copyediting stage, and it lands in the editor's **Draft Files** panel. Stock OJS
   gives authors no upload path here at all — this is a Post45 addition, so it
   won't match anything you read in the OJS manual.
+- **When an author emails you a revision instead of using OJS.** Some will, and
+  you can put it into OJS on their behalf: on the review round, the **Upload**
+  button beside *Revisions Uploaded* is available to editors, not just authors.
+  Worth doing rather than leaving it in your inbox — a file uploaded there is
+  what the rest of the workflow (and the Notion board, once sync is on) can
+  actually see. Write up the exact steps and which file type to pick.
+- **The two legitimate ways an author sends a revision.** They can use the
+  **Upload** button beside *Revisions Uploaded*, or attach the file to a **Review
+  Discussion** message — the latter is normal when they want to explain what they
+  changed, not a mistake to correct. Both are fine; note what each looks like from
+  the editor's side so nobody goes hunting for a revision that is sitting on a
+  discussion thread.
 - **Publication agreement.** Nothing happens automatically on Accept — requesting
   the agreement is always an explicit action. The "N days ago" note on the
   Editorial State panel is the *only* reminder in the system; there is no email
