@@ -7,6 +7,85 @@ doesn't dilute the always-loaded instructions. For durable technical reference s
 
 ---
 
+## 2026-08-10 — Editorial state was readable *and writable* by authors (launch blocker)
+
+Found while starting the author-visibility sweep (backlog item B). The Editorial
+State panel — Owner, copyediting/production substatus, publication-agreement
+status, URL and dates — rendered in the author's own workflow view. Confirmed in
+the browser, then traced to three independent gaps, all now closed.
+
+**Why it happened.** `injectAdminAssets()` gated on `getRequestedPage()` being in
+a backend-page allowlist. That is not a role check: `submission` and `dashboard`
+are author pages too, so all 14 injected scripts were served to authors and
+reviewers. The panel itself has no role logic — it keys only on stage — and the
+Vue extender it uses wraps `getSecondaryItems` on the *shared* workflow config,
+which the author view (`workflowConfigAuthorOJS`) goes through as well.
+
+**The worse half: it was writable.** The panel saves with `PUT /submissions/{id}`.
+That route lists `ROLE_ID_AUTHOR` among its permitted roles, and
+`PKPSubmissionController::edit()` filters incoming properties only by the
+schema's `writeDisabledInApi` flag — it applies no per-role property rules. None
+of the six Post45 properties set that flag. So an author could set their own
+Owner and, notably, mark their own publication agreement signed. Those writes
+also fire `SubmissionEditEventsHook`, which is what post45NotionSync mirrors onto
+the board — so an author write would have moved the editorial board.
+
+**The fix, in three layers** (the first two are the real ones; hiding a panel
+does nothing about a hand-crafted request):
+
+- **Read** — `Post45SubmissionSchemaMap` overrides `mapByProperties()`, the single
+  funnel every read path uses, and strips the six properties for non-editorial
+  users. Deliberately *not* done by making the schema role-conditional: the
+  schema also drives persistence, so a request that omitted the properties could
+  round-trip a submission and drop the stored values.
+- **Write** — `Post45SubmissionRepository::validate()` rejects the properties with
+  a named error. It fails loudly rather than silently stripping, so nothing
+  believes a write succeeded when it didn't. Both ride one container binding,
+  the same pattern as `Post45SubmissionFileRepository`.
+- **Assets** — `injectAdminAssets()` now splits its 14 scripts into shared vs
+  editorial-only behind `EditorialRoleGate`. The split is not "editor vs author":
+  the scripts that *hide* native OJS machinery stay shared, because withholding
+  those would show authors **more** than before.
+
+**Who counts as editorial** (decided with the team): journal managers,
+journal/section/guest editors, copyeditors — `ROLE_ID_MANAGER`, `SUB_EDITOR`,
+`ASSISTANT`, plus site admin. Not authors, not reviewers. Copyeditors are in
+deliberately: the substatus tracks their own work.
+
+**Also fixed in passing:** `production-url-field.js` and
+`author-facing-decisions.js` were reaching authors too — an editable WordPress
+URL field and a set of editor decision buttons.
+
+**Verified** by breaking each guard and watching the check fail, then restoring:
+role truth table, read gate (author/reviewer 0 of 6 properties, editor 6 of 6),
+write gate (author and reviewer rejected, manager and CLI allowed). The CLI
+fail-open is deliberate — sync jobs and dev tools have no request user.
+
+**Still open:** `publicationUrl` lives on the *publication* schema and was not in
+scope here; whether authors can read it has not been established.
+
+## 2026-08-10 — Dev fixture seeds a submission in every state
+
+`tools/dev/createTestSubmissions.php --suite` seeds six submissions: fresh Stage
+1, Stage 1 after Request Desk Revision, two Stage 3 variants (reviewers invited;
+one reviewer accepted), Stage 4 and Stage 5.
+
+Each state is reached by **recording the real decision** through
+`Repo::decision()->add()` rather than setting `stageId` — so review rounds,
+decision history and stage assignments are all genuine. It deliberately seeds
+**no files and no completed reviews**: fabricating those would create states the
+UI cannot produce, which is precisely what hides UI bugs from a fixture.
+
+That principle immediately earned its keep. The first working version produced
+review assignments the dashboard rendered as `null` bubbles, because
+`EditorAction::setDueDates()` writes whatever it is handed and has no fallback
+to the journal defaults — and `addReviewer()` alone does not set `dateNotified`,
+without which no reviewer status can be computed. Both were caught by looking at
+the seeded rows in the real UI rather than by trusting the seed. Written up in
+`OJS-DEV-NOTES.md`.
+
+---
+
 ## 2026-07-06 — "Mark Published on WordPress" frontend built & browser-tested
 
 Completed the Stage-5 UI end-to-end (all in the plugin monorepo). Full technical record +

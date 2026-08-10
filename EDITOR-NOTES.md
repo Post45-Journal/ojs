@@ -75,6 +75,36 @@ button, and you decide afterwards whether the revision goes back to a reviewer
 
 ---
 
+## ✅ After "Request Desk Revision", the author replies in the discussion
+
+Request Desk Revision sends a Stage 1 submission back to the author before it
+ever reaches reviewers. Worth knowing before you use it: **it does not give the
+author an Upload button.**
+
+Stock OJS only opens an author's upload path at the *review* stages, and only
+once an R&R decision exists in the current round. Stage 1 has no review rounds,
+so there is nothing for that rule to key on. The author's own submission files
+become read-only to them the moment they finish submitting.
+
+**What the author actually does:** the decision creates a discussion thread with
+them, and they reply to it with the revised manuscript attached. Attaching a
+file to a discussion reply is always available to a participant, which is why
+this route works when the file panels don't.
+
+**So when you write the decision email, tell them to reply in that thread** —
+don't ask them to "upload a revised version", because they will go looking for a
+button that isn't there.
+
+**Then move the file where it belongs.** A file attached to a discussion stays in
+the discussion; it does not appear in the submission's file list. Once the author
+replies, upload their file into the submission files yourself, the same way you
+would handle a revision that arrived by email (see the note below).
+
+If this becomes common enough to be annoying, say so — giving authors a real
+upload button at Stage 1 is buildable, it just hasn't been built.
+
+---
+
 ## 📝 To write up
 
 Topics we know are worth an entry. Add detail when someone next walks the path.
