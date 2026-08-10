@@ -100,6 +100,13 @@ Topics we know are worth an entry. Add detail when someone next walks the path.
   author's original filename. Worth knowing so it isn't reported as a bug.
 - **What reviewers actually see** at each step, for answering their questions
   without having to log in as one.
+- **The Notion board is written by OJS now** (once sync is switched on). Some
+  columns are OJS's to fill and get rewritten on the next sync, so editing them
+  on the board doesn't stick — status, decision, dates, the agreement fields, the
+  links. Others stay yours and OJS never touches them: `Assigned to`, `Keywords`,
+  the "needs fixing?" flags, `Archived`, attachments, `Current Task Due`. Write up
+  which is which, and where to make a change so it survives (in OJS, for the first
+  group). Not live yet — nothing on the board changes until sync is enabled.
 
 ---
 

@@ -170,11 +170,40 @@ Discovered while landing the first integration test (`MarkPublishedTest`,
   ```
   (In PHP 8.1+, `ReflectionProperty::setAccessible()` is deprecated — plain
   `setValue()` works because properties are always accessible.)
-- **PKP_TEST_ENTIRE_DB is slow: ~10s/test.** Full dump-restore per test.
-  Fine for a few tests; profile-eating at scale. Switch each test to
-  `getAffectedTables()` (returning `['publications', 'publication_settings',
-  'submissions', 'event_log_settings', ...]`) once its touched-table set is
-  known. Table-scoped backup is SQL-only (fast, no shell-out).
+- **PKP_TEST_ENTIRE_DB is slow, and the cost is DDL — not data.** A restore is
+  ~150 `DROP`+`CREATE TABLE`, i.e. ~150 InnoDB tablespace files deleted and
+  recreated. Measured on this laptop (2026-08-09): ~26s per restore with the
+  11MB dev-clone dump, ~17s with the 57KB CI fixture. A 400x smaller dump buys
+  ~35%, so **shrinking the fixture is not the lever**; neither is `TRUNCATE`
+  (InnoDB truncate is itself a drop+recreate — measured no better). The levers,
+  in order:
+  1. **Fewer restores.** `protected static bool $restoreOncePerClass = true` on
+     `DockerDatabaseTestCase` subclasses. Whatever shared state the tests
+     actually depend on gets reset explicitly in `setUp()` instead — cheaper,
+     and it removes the hidden dependence on method declaration order that a
+     per-test restore was papering over. All 14 integration classes are opted in
+     as of 2026-08-09; suite went **9:35 → 4:18**.
+  2. **`getAffectedTables()` returning a real table list** instead of
+     `PKP_TEST_ENTIRE_DB`. Table-scoped backup is SQL-only — no DDL, no
+     shell-out — so it skips the cost entirely. The right end state for most
+     classes; needs each one's touched-table set worked out first.
+  3. **Server durability settings.** `DockerDatabaseTestCase` already sends
+     `SET sql_log_bin = 0` with each restore (session-scoped). The bigger two are
+     global, i.e. properties of how the container was started, so they are NOT in
+     code — set them on the test MySQL container if you want them:
+     `--innodb-flush-log-at-trx-commit=0 --sync-binlog=0` (worth ~35% on a
+     restore). Safe here for the obvious reason: the dump is the durability.
+     Applying them with `SET GLOBAL` does not survive a container restart.
+- **`tools/dev/run-integration-tests.sh` prints live progress** — one line per
+  test class as it starts and finishes, plus a slowest-classes table at the end.
+  It comes from PHPUnit's `--log-events-text` over a **FIFO**: PHPUnit's
+  EventLogger re-opens the log path with `file_put_contents` on every event, so a
+  bash `>(...)` process-substitution path works exactly once and then floods the
+  run with "Failed to open stream". A FIFO also needs a writer descriptor held
+  open for the whole run (the script uses fd 9), or the reader hits EOF after the
+  first event and exits — and a FIFO with no reader **blocks phpunit
+  indefinitely**, which looks exactly like a hang. Hence the `|| cat >/dev/null`
+  drain fallback behind the filter.
 - **Plugin locale leaks across tests → integration + pure-unit tests must run
   in separate PHPUnit processes.** An integration test's setUp calls
   `$plugin->register($contextId)`, which loads the plugin's `locale.po`
