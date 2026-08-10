@@ -56,6 +56,33 @@ Do **not** reverse-engineer these from source — read the reference and cite it
   submission email log; none are actually sent. Local `php -S` logs → `/tmp/ojs-server.log`
   (confirm the path via `/proc/<pid>/fd/2`).
 
+### Seeding reviewer assignments from a CLI tool
+
+`EditorAction::addReviewer()` is the native "assign a reviewer" call (the Add
+Reviewer form makes exactly this call), but it assumes a live HTTP request and
+fails two ways under CLI:
+
+- **It emails the reviewer unless `skipEmail` is set**, and reads the outgoing
+  template from the `template` request var — which a CLI run cannot supply, so
+  the send dies on `getByKey(): Argument #2 must be of type string, null given`.
+  Set `$_GET['skipEmail'] = 1`, then null `$request->_requestVars` — PKPRequest
+  memoizes `$_GET + $_POST` on first access, and bootstrapping has already
+  triggered it, so setting `$_GET` alone is too late.
+- **`setDueDates()` has no fallback.** It writes whatever it is handed, so
+  passing `null` leaves `date_due` / `date_response_due` NULL and the editorial
+  dashboard renders the reviewer bubbles as the literal string `null`. The form
+  computes the defaults itself via the `HasReviewDueDate` trait
+  (`numWeeksPerReview` / `numWeeksPerResponse`, falling back to 4 and 3 weeks) —
+  use the same trait rather than inventing dates.
+
+`addReviewer()` also does not finish the job: `ReviewerForm::execute` writes
+`dateNotified`, `reviewFormId` and `considered` immediately afterwards.
+`dateNotified` is what makes an assignment read as *awaiting response* rather
+than an un-sent invitation, so omitting it leaves the dashboard unable to
+compute a reviewer status.
+
+All three are handled in `tools/dev/createTestSubmissions.php --suite`.
+
 ### phpunit for plugin tests
 
 The full test-infra plan lives in the `test_infrastructure_plan` memory. Recipe:
