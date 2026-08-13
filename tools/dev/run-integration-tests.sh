@@ -61,7 +61,30 @@ fi
 # Swap config files for the run, restore on any exit.
 mv config.inc.php config.inc.php.dev-backup
 cp config.test.inc.php config.inc.php
-trap 'mv config.inc.php.dev-backup config.inc.php' EXIT INT TERM
+trap 'mv config.inc.php.dev-backup config.inc.php; clear_laravel_cache' EXIT INT TERM
+
+# Clear the Laravel file cache at BOTH ends of the run.
+#
+# This swap points the app at ojs_test, but `cache/` is a directory on disk and
+# is not swapped with it — so the two databases share one cache. PluginSettingsDAO
+# serves plugin settings through Cache::remember(), which means a settings entry
+# written while the app was pointed at the dev DB is served verbatim during a test
+# run against ojs_test.
+#
+# That is not a hypothetical: it silently disabled post45Cfp for the whole
+# integration suite. Its settings were cached as empty, so `getEnabled()` returned
+# null, `register()` bailed before `DAORegistry::registerDAO()`, and all 13 of its
+# tests died with "Unrecognized DAO Post45CfpPageDAO" — a failure that looks like a
+# broken plugin and is actually a stale cache. Restoring the database does not help,
+# because the cache is not in the database.
+#
+# Cleared before so the run starts clean, and after so the dev environment is not
+# left holding entries derived from ojs_test. The cache is derived state; the only
+# cost of dropping it is that the next page load rebuilds it.
+clear_laravel_cache() {
+    find "$ROOT/cache/opcache" -mindepth 1 -delete 2>/dev/null || true
+}
+clear_laravel_cache
 
 # Live progress.
 #
