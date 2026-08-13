@@ -105,15 +105,154 @@ upload button at Stage 1 is buildable, it just hasn't been built.
 
 ---
 
+## ⚠️ The two file panels in Copyediting — who can see what
+
+**Check this in the browser before relying on it.** The behaviour is built and
+tested, but nobody has walked it on screen yet.
+
+Copyediting has two file panels, and Post45 uses them differently from stock
+OJS. The difference that matters is **who can see them**:
+
+| Panel | Authors see it? | What belongs there |
+|---|---|---|
+| **Draft Files** | **No — never** | Your working copies. The manuscript carried over from review, your first and second edits, anything still in progress. |
+| **Manuscript & Copyedits** (core calls it Copyedited Files) | **Yes** | Anything the author sends you or you send them: their copyediting-ready manuscript, the copyedited document you send out, the version they return. |
+
+This split exists because OJS can only hide a whole panel, not individual files
+in it. There is no "hide this one file from the author" setting — if a file is
+in Manuscript & Copyedits, the author can see it and download it. So **put
+drafts in progress in Draft Files**, and move something across only when you mean the
+author to have it.
+
+The panel descriptions in OJS have been rewritten to say this, so you don't
+have to remember it from here.
+
+---
+
+## ⚠️ The status now follows the files — you shouldn't have to set it
+
+**Check this in the browser before relying on it.**
+
+The Copyediting status used to be a dropdown you had to remember to change.
+Now most of it moves on its own, as files arrive:
+
+| What happens | Status becomes |
+|---|---|
+| Author's manuscript arrives in **Copyedited Files** | Manuscript received |
+| You run **Send Copyedits to Author** | Edits with author |
+| Author returns the approved document to **Copyedited Files** | Copyedits approved by author |
+
+**First edit / second edit are set by hand for now — this is temporary.** They
+are meant to be driven by *assigning* the edit: an editor picks who does the
+first edit, that person gets an email, and the status follows from the
+assignment. That action doesn't exist yet, so until it does you set these two
+yourself.
+
+They are deliberately *not* driven by uploading to Draft Files, and won't be:
+uploading means that edit is **finished**, so treating it as "in progress" would
+say the opposite of what happened.
+
+The dropdown is still there and still works, but it is **on its way out** — it
+exists right now only to correct a state that was read wrongly, never to drive
+the workflow. So if you find yourself reaching for it, that is worth reporting:
+each time it is needed marks a real action the system failed to notice, and the
+fix is to make that action register rather than to keep marking it by hand.
+
+Two things it deliberately will not do: it never moves the status *backwards*
+(if you've already pushed a submission forward, a late file won't rewind it),
+and a third or fourth edit stays at "Second edit in progress".
+
+---
+
+## ⚠️ A file that arrives the wrong way needs one extra step
+
+**Check this in the browser before relying on it.**
+
+Authors will email you manuscripts, and they'll attach files to discussion
+threads instead of using the upload button. Neither of those puts the file in
+the file panels — so as far as the rest of the workflow is concerned, and as
+far as the Notion board is concerned, **it hasn't arrived**.
+
+The fix is the same in both cases and takes a few seconds:
+
+1. Go to the right panel — **Copyedited Files** for anything to or from the
+   author, **Draft Files** for your own working copy.
+2. Click **Upload/Select Files**.
+3. If the file came by email, upload it. If it's on a discussion thread, it's
+   already in the list — just tick it and add it.
+
+Doing this is what makes the file count. The status moves and the Notion board
+updates off that step, so skipping it leaves the board saying the submission is
+still waiting on the author.
+
+An emailed manuscript you add this way counts exactly as if the author had
+uploaded it themselves — that's deliberate, since you're putting it where it
+should have gone.
+
+---
+
+## ⚠️ Send To Production is blocked until something is in Copyedited Files
+
+**Check this in the browser before relying on it.**
+
+Stock OJS lets you run **Send To Production** with both file lists showing "No
+items found", which leaves the submission in Production with nothing to produce
+from. Post45 refuses that: if **Copyedited Files** is empty, the decision won't
+record and you'll get a message saying so.
+
+An empty Copyedited Files panel means the round-trip never happened — the
+author was never sent edits and never returned anything, because both of those
+put a file there. If you're sure copyediting is done and the file is elsewhere
+(a discussion thread, Draft Files, your inbox), use the step above to move it
+across, then run the decision.
+
+---
+
+## ✅ The "Status" box appears on every stage except the one you're on
+
+Not a bug, and not something Post45 changed. That grey **Status** box at the top
+of a stage — "The submission advanced to the next review round, was accepted, and
+is currently in the Copyediting stage" — exists only to tell you **you are not
+looking at the stage the submission is actually in**.
+
+So it shows on every stage *except* the live one, which makes the live stage look
+like it is missing something. It isn't: there is nothing to orient you away from
+when you are already in the right place.
+
+It also appears when you open a stage the submission has not reached yet, and
+when you look back at an earlier review round.
+
+If you want to confirm it, move a submission on a stage — the box disappears from
+the new stage and appears on the old one.
+
+---
+
+## ⚠️ Send Copyedits to Author: upload the file *in* the decision
+
+**Check this in the browser before relying on it.**
+
+You do not need to upload the copyedited document first and then send it. The
+natural order is the other order:
+
+1. Finish the copyedit on your own machine.
+2. Click **Send Copyedits to Author**.
+3. On the **Attach Files** step, **Upload File** — that's the only option, on
+   purpose.
+
+That one upload does three things: attaches the file to the email, files it in
+**Manuscript & Copyedits** so the author can find it in OJS, and puts a copy on
+the discussion thread. There is no separate "attach a file already in the panel"
+option, because anything already in that panel is visible to the author anyway.
+
+Because the file lands in Manuscript & Copyedits, this also satisfies the check
+that blocks **Send To Production** when nothing has been copyedited.
+
+---
+
 ## 📝 To write up
 
 Topics we know are worth an entry. Add detail when someone next walks the path.
 
-- **Author's post-acceptance manuscript upload.** After acceptance we ask authors
-  for a style-guide-conformed version. They upload it in a specific place at the
-  Copyediting stage, and it lands in the editor's **Draft Files** panel. Stock OJS
-  gives authors no upload path here at all — this is a Post45 addition, so it
-  won't match anything you read in the OJS manual.
 - **When an author emails you a revision instead of using OJS.** Some will, and
   you can put it into OJS on their behalf: on the review round, the **Upload**
   button beside *Revisions Uploaded* is available to editors, not just authors.
@@ -134,8 +273,8 @@ Topics we know are worth an entry. Add detail when someone next walks the path.
 - **Editorial State panel.** Owner, stage status, publication agreement — three
   sections, each with its own Save button. Which fields appear depends on the
   stage you're on.
-- **Copyediting and Production statuses.** What each value means and when to set
-  it, including which are set for you by a decision and which you flip by hand.
+- **Production statuses.** What each Stage 5 value means and when to set it. The
+  Copyediting half is covered above; the proofs states are still hand-set.
 - **Mark Published on WordPress.** Terminal action — what it does, and why the
   WordPress URL has to be saved before you run it.
 - **Double-anonymous downloads.** Reviewers see a renamed file rather than the
