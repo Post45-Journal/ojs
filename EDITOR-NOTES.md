@@ -131,16 +131,38 @@ have to remember it from here.
 
 ## ⚠️ The status now follows the files — you shouldn't have to set it
 
-**Check this in the browser before relying on it.**
+**📝 To verify in the browser — behaviour built in v1.0.14.0, not yet walked
+end-to-end on prod.**
 
 The Copyediting status used to be a dropdown you had to remember to change.
-Now most of it moves on its own, as files arrive:
+Now most of it moves on its own, driven by what people **say** about the files
+they upload:
 
 | What happens | Status becomes |
 |---|---|
-| Author's manuscript arrives in **Copyedited Files** | Manuscript received |
+| Author uses **Upload copyedit-ready manuscript** in Copyedited Files | Manuscript received |
 | You run **Send Copyedits to Author** | Edits with author |
-| Author returns the approved document to **Copyedited Files** | Copyedits approved by author |
+| Author uses **Upload approved copyedits** in Copyedited Files | Copyedits approved by author |
+
+The author's view of the Copyedited Files panel has three upload buttons — one
+for each of those two tagged uploads, plus a plain "Upload other file" for
+supporting material (abstracts, images, anything else). They pick the button
+that says what they're sending. Only the two tagged ones move the status.
+
+**When the button was the wrong one, you can fix it.** On any file in
+Copyedited Files, the row menu has **Mark as copyedit-ready manuscript** /
+**Mark as approved copyedits** / **Remove tag**. Marking a file has the same
+effect as the author using the matching upload button. The file's current tag
+shows as a badge in the Tag column so you can see at a glance which file is
+what — untagged files show a blank badge.
+
+If you mark a file from the row menu, the substatus in the Editorial State
+panel updates on the server but the dropdown doesn't refresh live — reload the
+page to see the new value. (Not a blocker: the dropdown is on its way out.)
+
+**You are told when they upload.** Every author upload into Copyedited Files
+sends you an email regardless of which button they used, so you know something
+landed even if the status did not move.
 
 **First edit / second edit are set by hand for now — this is temporary.** They
 are meant to be driven by *assigning* the edit: an editor picks who does the
@@ -152,15 +174,15 @@ They are deliberately *not* driven by uploading to Draft Files, and won't be:
 uploading means that edit is **finished**, so treating it as "in progress" would
 say the opposite of what happened.
 
-The dropdown is still there and still works, but it is **on its way out** — it
-exists right now only to correct a state that was read wrongly, never to drive
-the workflow. So if you find yourself reaching for it, that is worth reporting:
-each time it is needed marks a real action the system failed to notice, and the
-fix is to make that action register rather than to keep marking it by hand.
+The dropdown is still there and still works, but it is **on its way out**. It
+exists right now only to correct a state that ended up wrong for a reason the
+row menu cannot fix. If you reach for it, that is worth reporting: each time it
+is needed marks a real action the system failed to notice, and the fix is to
+make that action register rather than to keep marking it by hand.
 
 Two things it deliberately will not do: it never moves the status *backwards*
-(if you've already pushed a submission forward, a late file won't rewind it),
-and a third or fourth edit stays at "Second edit in progress".
+(if you've already pushed a submission forward, a late file or a late tag won't
+rewind it), and a third or fourth edit stays at "Second edit in progress".
 
 ---
 
