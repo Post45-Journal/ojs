@@ -164,25 +164,60 @@ page to see the new value. (Not a blocker: the dropdown is on its way out.)
 sends you an email regardless of which button they used, so you know something
 landed even if the status did not move.
 
-**First edit / second edit are set by hand for now — this is temporary.** They
-are meant to be driven by *assigning* the edit: an editor picks who does the
-first edit, that person gets an email, and the status follows from the
-assignment. That action doesn't exist yet, so until it does you set these two
-yourself.
+**First edit and Second edit are driven by assignment (v1.0.15.0).** Two
+per-participant actions replace the manual dropdown for these two states.
+They live on the **"…" menu** of each row in the **Participants** panel on
+the Copyediting stage:
 
-They are deliberately *not* driven by uploading to Draft Files, and won't be:
-uploading means that edit is **finished**, so treating it as "in progress" would
-say the opposite of what happened.
+- **Assign as first edit** — clicks through to a composer pre-scoped to
+  that participant. Sending sets the Copyediting status to **First edit in
+  progress**, makes that participant the submission's current owner,
+  emails them, and creates a stage-4 discussion thread for the handoff.
+- **Assign as second edit** — same shape for the second round.
 
-The dropdown is still there and still works, but it is **on its way out**. It
-exists right now only to correct a state that ended up wrong for a reason the
-row menu cannot fix. If you reach for it, that is worth reporting: each time it
-is needed marks a real action the system failed to notice, and the fix is to
-make that action register rather than to keep marking it by hand.
+Menu items appear only when the participant's user_group has the
+**Copyediting** checkbox ticked in Users & Roles → Roles (that's Section
+Editor, Managing Editor, Assistant Editor, Copyeditor, and any other
+editorial role currently authorized on Copyediting) — minus the author,
+who can never be assigned their own edit. Un-ticking the Copyediting box
+for a role removes the menu items for participants in that role on the
+next page load, no code change.
 
-Two things it deliberately will not do: it never moves the status *backwards*
-(if you've already pushed a submission forward, a late file or a late tag won't
-rewind it), and a third or fourth edit stays at "Second edit in progress".
+**To assign a copyeditor who isn't yet a participant:** use the native
+**Assign** button on the Participants panel to add them (this is the
+same modal you'd use on any other stage). Once they're on the list,
+their "…" menu carries the Assign-as-First/Second-edit items. Two
+clicks total. If you don't want to send the standard Request Copyedit
+email while adding them, leave the message body empty in the Assign
+modal — OJS suppresses the email when the body is blank.
+
+They are deliberately *not* driven by uploading to Draft Files, and never
+will be: uploading means that edit is **finished**, so treating it as "in
+progress" would say the opposite of what happened.
+
+**What OJS doesn't automate (yet) — the copyeditor's upload.** When the
+person doing the edit uploads their draft to Draft Files, OJS won't
+notify you and the Copyediting status stays at *First / Second edit in
+progress*. You'll need to check Draft Files periodically, or the
+copyeditor will need to ping you (Slack, email). This is fine if the
+team is already coordinating out-of-band, and Notion mirrors the same
+truth (status doesn't move until you take the next editorial action).
+If you'd rather have OJS notify you + move the status when a draft
+lands, that's a clean addition — flag it and we'll wire a hook that
+watches Draft Files uploads by the current owner.
+
+**The dropdown no longer offers First / Second edit.** As of v1.0.15.0, the
+Editorial State panel dropdown for Stage 4 lists only *Manuscript received*,
+*Copyedits with author*, and *Copyedits approved by author* — the three
+states that either arrive from tagged uploads or from Send Copyedits /
+Send To Production. A submission that already carries First / Second edit
+in progress from before still shows the value in the dropdown (nothing is
+lost); you just can't freshly select it there — use the decision instead.
+
+Two things the whole substatus system deliberately will not do: it never
+moves the status *backwards* (if you've already pushed a submission forward,
+a late file or a late tag won't rewind it), and a third or fourth edit stays
+at "Second edit in progress".
 
 ---
 
