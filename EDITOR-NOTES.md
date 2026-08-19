@@ -345,6 +345,19 @@ Topics we know are worth an entry. Add detail when someone next walks the path.
   the "needs fixing?" flags, `Archived`, attachments, `Current Task Due`. Write up
   which is which, and where to make a change so it survives (in OJS, for the first
   group). Not live yet — nothing on the board changes until sync is enabled.
+- 📝 **Reassign `Assigned to` when you take a decision.** When you record a
+  decision that puts the ball in someone else's court (Request Revisions -> the
+  author, Send Copyedits to Author -> the author, Send to Production -> a
+  copyeditor, and so on), also reassign the submission's owner in OJS to
+  whoever needs to act next. That's the value the Notion board's `Assigned to`
+  column reflects. Write up which decisions imply which handoffs; consider a
+  post-decision UI prompt.
+- 📝 **Returning a pre-review revision to the editors** (post-`RequestDeskRevision`).
+  The stage-1 tagged-upload path is still being built (Chunk B of Session 3D).
+  Until it lands, authors have no file-grid upload channel at stage 1 — they
+  respond through the decision's discussion thread. When you get one that way,
+  regularise the attachment into the Submission Files bucket via Upload/Select
+  so it reaches reviewers when you advance the round.
 
 ---
 
