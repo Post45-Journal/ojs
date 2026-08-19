@@ -75,33 +75,59 @@ button, and you decide afterwards whether the revision goes back to a reviewer
 
 ---
 
-## ✅ After "Request Desk Revision", the author replies in the discussion
+## ⚠️ After "Request Desk Revision", the author has a real upload button (v1.0.18.0)
+
+**📝 To verify in the browser — behaviour built in v1.0.18.0, not yet walked
+end-to-end on prod.**
 
 Request Desk Revision sends a Stage 1 submission back to the author before it
-ever reaches reviewers. Worth knowing before you use it: **it does not give the
-author an Upload button.**
+ever reaches reviewers. Post45 gives the author a real Upload path for this,
+which is not something stock OJS provides.
 
-Stock OJS only opens an author's upload path at the *review* stages, and only
-once an R&R decision exists in the current round. Stage 1 has no review rounds,
-so there is nothing for that rule to key on. The author's own submission files
-become read-only to them the moment they finish submitting.
+**What the author sees:** the moment you record the Request Desk Revision
+decision, the author's Submission Files panel gets a single **Upload revised
+manuscript** button at the top. It's only there while the ask is
+outstanding — as soon as you take any other decision (Send for Review,
+Accept, Decline, another Request Desk Revision), the button disappears and
+the panel goes back to read-only.
 
-**What the author actually does:** the decision creates a discussion thread with
-them, and they reply to it with the revised manuscript attached. Attaching a
-file to a discussion reply is always available to a participant, which is why
-this route works when the file panels don't.
+**What that button does:** the author's upload lands in Submission Files
+already tagged as their revision, and the Notion `Review Status` for the
+submission flips to `Received` on the next sync. No moving files around by
+hand.
 
-**So when you write the decision email, tell them to reply in that thread** —
-don't ask them to "upload a revised version", because they will go looking for a
-button that isn't there.
+**So write the decision email around that button.** Tell them to open the
+submission and use **Upload revised manuscript** in Submission Files, not
+"reply in this discussion with your file attached". The discussion thread
+the decision creates is for questions and back-and-forth about the ask, not
+for the file itself.
 
-**Then move the file where it belongs.** A file attached to a discussion stays in
-the discussion; it does not appear in the submission's file list. Once the author
-replies, upload their file into the submission files yourself, the same way you
-would handle a revision that arrived by email (see the note below).
+**Deliberately just one button.** Copyediting's version of this pattern has
+a matching "Upload other file" for supporting material; Stage 1 does not.
+The window is narrow — respond to a specific ask — and giving a second
+"anything else" button would blur what you asked for. If the author needs
+to send you something alongside the revision, they can attach it to the
+decision's discussion thread.
 
-If this becomes common enough to be annoying, say so — giving authors a real
-upload button at Stage 1 is buildable, it just hasn't been built.
+## ⚠️ The "just-submitted, spotted a typo" case still needs your help
+
+The upload button above only appears when *you* have asked for a revision.
+If an author submits, notices something wrong 20 minutes later, and wants
+to send you a corrected file, they still have no Upload path — the same
+situation as before v1.0.18.0.
+
+**What they'll do instead:** open a discussion on their submission and
+attach the corrected file to their first message. Discussion attachments
+are always available to a participant.
+
+**What you do about it:** download the corrected file from the discussion
+attachment, then **Upload File** it into Submission Files yourself. Delete
+the old version (or keep it as history — your call). Same as regularising
+any file that arrived by email.
+
+Not a first-class action yet — a one-click "promote from discussion to
+Submission Files" is buildable if this comes up often enough to matter. Say
+so if you find yourself doing this weekly.
 
 ---
 
