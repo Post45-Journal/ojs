@@ -182,9 +182,9 @@ effect as the author using the matching upload button. The file's current tag
 shows as a badge in the Tag column so you can see at a glance which file is
 what — untagged files show a blank badge.
 
-If you mark a file from the row menu, the substatus in the Editorial State
-panel updates on the server but the dropdown doesn't refresh live — reload the
-page to see the new value. (Not a blocker: the dropdown is on its way out.)
+If you mark a file from the row menu, the status shown in the Editorial State
+panel updates on the server, but the panel doesn't refresh live — reload the
+page to see the new value.
 
 **You are told when they upload.** Every author upload into Copyedited Files
 sends you an email regardless of which button they used, so you know something
@@ -232,13 +232,14 @@ If you'd rather have OJS notify you + move the status when a draft
 lands, that's a clean addition — flag it and we'll wire a hook that
 watches Draft Files uploads by the current owner.
 
-**The dropdown no longer offers First / Second edit.** As of v1.0.15.0, the
-Editorial State panel dropdown for Stage 4 lists only *Manuscript received*,
-*Copyedits with author*, and *Copyedits approved by author* — the three
-states that either arrive from tagged uploads or from Send Copyedits /
-Send To Production. A submission that already carries First / Second edit
-in progress from before still shows the value in the dropdown (nothing is
-lost); you just can't freshly select it there — use the decision instead.
+**There is no dropdown any more (v1.0.19.0).** The Editorial State panel now
+shows the copyediting status as a short read-only sentence — the same shape
+as OJS's grey "Status" box on inactive stages. Every value has an action
+that writes it (tagged uploads, Assign First / Second Edit, Send Copyedits
+to Author), so nothing about the workflow needs an editor to flip the
+status by hand. If it looks wrong, the fix is to take the action that would
+correct it (retag a file, run the right decision) rather than editing the
+status directly.
 
 Two things the whole substatus system deliberately will not do: it never
 moves the status *backwards* (if you've already pushed a submission forward,
