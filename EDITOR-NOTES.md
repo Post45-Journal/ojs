@@ -354,11 +354,14 @@ Topics we know are worth an entry. Add detail when someone next walks the path.
   Editorial State panel is the *only* reminder in the system; there is no email
   or digest. Also covers backdating a request or signature you didn't record on
   the day.
-- **Editorial State panel.** Owner, stage status, publication agreement — three
-  sections, each with its own Save button. Which fields appear depends on the
-  stage you're on.
-- **Production statuses.** What each Stage 5 value means and when to set it. The
-  Copyediting half is covered above; the proofs states are still hand-set.
+- **Editorial State panel.** Owner (editable), stage status (read-only sentence
+  on both Copyediting and Production), publication agreement (editable on
+  Copyediting). Which sections appear depends on the stage you're on.
+- **Production statuses.** What each Stage 5 value means and what drives it.
+  `proofs_with_author` currently comes from **Send Proofs to Author**; the
+  other three values (`preparing_proofs`, `proofs_approved_by_author`,
+  `ready_for_publication`) have no driver yet — the panel will keep saying
+  whatever the last status was until Session 2.6 wires up the missing writers.
 - **Mark Published on WordPress.** Terminal action — what it does, and why the
   WordPress URL has to be saved before you run it.
 - **Double-anonymous downloads.** Reviewers see a renamed file rather than the
