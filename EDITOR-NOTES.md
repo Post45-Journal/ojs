@@ -333,6 +333,43 @@ that blocks **Send To Production** when nothing has been copyedited.
 
 ---
 
+## ⚠️ Sending proofs and marking them approved (v1.0.21.0)
+
+**📝 To verify in the browser — new in v1.0.21.0.**
+
+Proofs live on **WordPress**, not in OJS. The author previews the piece on the
+WordPress site and replies to the discussion thread with their approval. OJS
+carries the discussion + records the transitions; it does not carry the proofs.
+
+The three Production statuses each have a real driver now:
+
+| What happens | Status becomes |
+|---|---|
+| You run **Send To Production** (the last thing you do in Copyediting) | Preparing proofs |
+| You run **Send Proofs to Author** at Stage 5 | Proofs with author |
+| You run **Mark Proofs Approved** at Stage 5 | Proofs approved by author |
+
+**Mark Proofs Approved is a one-click decision.** No email step, no composer —
+click it, confirm, done. The point is to record what already happened outside
+OJS (the author replied to the discussion saying the proofs look good), so
+adding a second email would just repeat the acknowledgement. On the Notion
+board this is the **Ready for Publication** state — the "everything is ready
+to go live" signal you can look at without opening the submission.
+
+If you skip **Send Proofs to Author** and record the approval directly
+(you ran the proof round out-of-band and just want to note the outcome),
+Mark Proofs Approved still works — the status jumps straight from
+*Preparing proofs* to *Proofs approved by author*. It won't rewind, and
+you can't run it after **Mark Published on WordPress**.
+
+**`ready_for_publication` is not a separate state any more.** Proofs
+approved by the author IS the "ready to publish" moment; the previous
+distinction was extra ceremony without extra information. The Notion
+mapping collapses both onto the same **Ready for Publication** option, so
+the board reads the same either way.
+
+---
+
 ## 📝 To write up
 
 Topics we know are worth an entry. Add detail when someone next walks the path.
@@ -357,11 +394,11 @@ Topics we know are worth an entry. Add detail when someone next walks the path.
 - **Editorial State panel.** Owner (editable), stage status (read-only sentence
   on both Copyediting and Production), publication agreement (editable on
   Copyediting). Which sections appear depends on the stage you're on.
-- **Production statuses.** What each Stage 5 value means and what drives it.
-  `proofs_with_author` currently comes from **Send Proofs to Author**; the
-  other three values (`preparing_proofs`, `proofs_approved_by_author`,
-  `ready_for_publication`) have no driver yet — the panel will keep saying
-  whatever the last status was until Session 2.6 wires up the missing writers.
+- **Production statuses in depth.** The write-up above covers the three
+  drivers; the "to write up" version wants the fuller version — what each
+  value means for downstream tasks (typesetting, scheduling, announcement),
+  when a status "sticks" vs when it moves forward, and how to read the
+  panel when a submission has been in Production for a while.
 - **Mark Published on WordPress.** Terminal action — what it does, and why the
   WordPress URL has to be saved before you run it.
 - **Double-anonymous downloads.** Reviewers see a renamed file rather than the
