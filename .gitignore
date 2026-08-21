@@ -31,6 +31,7 @@ registry/uiLocaleKeysBackend.json
 /plugins/generic/post45NotionSync
 /plugins/generic/smtpLocalDomain
 /plugins/themes/pragmaSubmissions
+/plugins/generic/post45DevEmailGuard
 
 # Claude Code local session state (per-user, per-machine)
 /.claude/
