@@ -1028,6 +1028,17 @@ TXT;
 
     private function assignEditorToSubmission(int $submissionId): void
     {
+        // 1. Auto-assign the section's configured editors (mirrors what OJS's
+        //    AssignEditors event listener does when a submission is submitted
+        //    through the wizard — we bypass the wizard so the listener
+        //    doesn't fire).
+        $submission = Repo::submission()->get($submissionId);
+        $subEditorsDao = DAORegistry::getDAO('SubEditorsDAO');
+        $subEditorsDao->assignEditors($submission, $this->context);
+
+        // 2. Also assign the populate-runner editor as a fallback (in case
+        //    the section has no editors configured, and because decisions
+        //    populate records need a real editor on the submission).
         $group = Repo::userGroup()
             ->userUserGroups($this->editor->getId(), $this->context->getId())
             ->first(fn ($g) => in_array(
@@ -1036,6 +1047,14 @@ TXT;
                 true
             ));
         if (!$group) {
+            return;
+        }
+        // Skip if the runner is already assigned (avoid duplicate stage_assignments).
+        $already = \PKP\stageAssignment\StageAssignment::withSubmissionIds([$submissionId])
+            ->withUserId($this->editor->getId())
+            ->get()
+            ->isNotEmpty();
+        if ($already) {
             return;
         }
         Repo::stageAssignment()->build(
@@ -1174,7 +1193,10 @@ TXT;
                 $reviewRound,
                 Core::getCurrentDate($reviewDue),
                 Core::getCurrentDate($responseDue),
-                null
+                // Post45 is always double-anonymous. Not relying on journal
+                // default because populate has run against wrongly-configured
+                // journal settings before; explicit avoids the trap.
+                ReviewAssignment::SUBMISSION_REVIEW_METHOD_DOUBLEANONYMOUS
             );
 
             $assignment = Repo::reviewAssignment()->getCollector()
@@ -1672,17 +1694,19 @@ TXT;
             ]);
         }
 
-        // Escape HTML in the extracted text, then convert paragraph breaks
-        // (double-newline) to <p></p> pairs. OJS note contents accept
-        // limited HTML and render <p> as paragraph breaks in the discussion
-        // panel. Single-newline breaks within a paragraph become <br/> for
+        // Escape HTML in the extracted text, then join paragraphs with
+        // <br/><br/> (visible blank line between them). NOT <p> tags —
+        // OJS's discussion-note CSS zeroes out paragraph margins, so <p>
+        // renders as packed-together text with no visual separation between
+        // paragraphs. Double <br/> forces the blank line regardless.
+        // Single-newline breaks within a paragraph become <br/> for
         // preserved line-wrapping (e.g., signature lines).
         $escaped = htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8');
-        $paragraphs = explode("\n\n", $escaped);
-        $htmlBody = implode('', array_map(
-            fn ($p) => '<p>' . str_replace("\n", '<br/>', trim($p)) . '</p>',
-            array_filter($paragraphs, fn ($p) => trim($p) !== '')
-        ));
+        $paragraphs = array_map(
+            fn ($p) => str_replace("\n", '<br/>', trim($p)),
+            array_filter(explode("\n\n", $escaped), fn ($p) => trim($p) !== '')
+        );
+        $htmlBody = implode('<br/><br/>', $paragraphs);
 
         Note::create([
             'assocType' => \PKP\core\PKPApplication::ASSOC_TYPE_QUERY,
@@ -1880,12 +1904,49 @@ TXT;
             return null;
         }
 
-        // Prefer server-supplied filename; fall back to a sensible default.
+        // Prefer server-supplied filename. Drive API's /files/{id}?alt=media
+        // endpoint doesn't send Content-Disposition, so for Drive files we
+        // need a separate metadata call to get the real name + extension.
+        // (Google Docs export DOES send Content-Disposition, so this only
+        // fires for the Drive path.)
+        if ($originalName === null && !$isDoc && $bearer !== null) {
+            $originalName = $this->fetchDriveFileName($id, $bearer);
+        }
         if ($originalName === null) {
             $originalName = $isDoc ? "google-doc-{$id}.docx" : "google-file-{$id}";
         }
 
         return ['abs' => $tempPath, 'originalName' => $originalName, 'temp' => true];
+    }
+
+    /**
+     * One-shot metadata lookup to get a Drive file's `name` field (which
+     * includes the extension). Called after downloading via /alt=media when
+     * Content-Disposition wasn't provided. Returns null on any failure —
+     * caller falls back to a synthesized `google-file-{id}` name.
+     */
+    private function fetchDriveFileName(string $fileId, string $bearer): ?string
+    {
+        // supportsAllDrives=true is required for files in Shared Drives (as
+        // opposed to the caller's personal My Drive). Post45's article files
+        // live in a Shared Drive, so without this flag every metadata lookup
+        // returns 404 — which is exactly the trap that produced
+        // `google-file-{id}` filenames for many uploads.
+        $url = "https://www.googleapis.com/drive/v3/files/{$fileId}?fields=name,mimeType&supportsAllDrives=true";
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $bearer],
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($httpCode !== 200) {
+            return null;
+        }
+        $meta = json_decode((string) $response, true);
+        return $meta['name'] ?? null;
     }
 
     /**

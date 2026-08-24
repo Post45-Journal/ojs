@@ -207,8 +207,18 @@ TXT;
             } catch (\Throwable $e) {
                 $this->summary['submissions_failed']++;
                 fwrite(STDERR, "    FAILED: {$e->getMessage()}\n");
+                // Full trace so we can diagnose the intermittent "Call to a
+                // member function getId() on null" that keeps hitting a few
+                // submissions. Frame with the actual null lookup is what we
+                // need to identify the plugin/hook responsible.
+                fwrite(STDERR, "    Trace:\n" . self::indentTrace($e->getTraceAsString()) . "\n");
             }
         }
+    }
+
+    private static function indentTrace(string $trace): string
+    {
+        return '      ' . str_replace("\n", "\n      ", $trace);
     }
 
     // ---------- Sync ledger truncate ----------
