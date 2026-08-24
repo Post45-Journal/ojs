@@ -89,13 +89,14 @@ class ProdInventoryTool extends CommandLineTool
     {
         $all = Repo::user()->getCollector()->getMany();
         $total = 0;
-        $suspects = [];
+        $rows = [];
         $byRole = [];
 
         foreach ($all as $u) {
             $total++;
             $username = (string) $u->getUsername();
             $email = (string) $u->getEmail();
+            $name = trim((string) $u->getFullName());
             $groups = Repo::userGroup()->userUserGroups($u->getId(), self::CONTEXT_ID)->all();
             $roleNames = [];
             foreach ($groups as $g) {
@@ -105,31 +106,27 @@ class ProdInventoryTool extends CommandLineTool
             }
             $roleNames = array_unique($roleNames);
 
-            $isSuspect = false;
-            $reasons = [];
+            // Flag potentially-test users so the eyeball pass has hints
+            $flags = [];
             if (stripos($username, 'test') !== false) {
-                $isSuspect = true;
-                $reasons[] = 'username contains "test"';
+                $flags[] = 'test-in-username';
             }
             if (stripos($email, '+test') !== false) {
-                $isSuspect = true;
-                $reasons[] = 'email contains "+test"';
+                $flags[] = '+test-in-email';
             }
             if (empty($groups)) {
-                $isSuspect = true;
-                $reasons[] = 'no roles';
+                $flags[] = 'no-roles';
             }
 
-            if ($isSuspect) {
-                $suspects[] = sprintf(
-                    '  id=%-4d %-24s <%s>  roles=[%s]  — %s',
-                    $u->getId(),
-                    $username,
-                    $email,
-                    implode(',', $roleNames) ?: '-',
-                    implode('; ', $reasons)
-                );
-            }
+            $rows[] = sprintf(
+                '  id=%-4d %-26s %-30s <%s>  roles=[%s]%s',
+                $u->getId(),
+                mb_substr($username, 0, 26),
+                mb_substr($name, 0, 30),
+                $email,
+                implode(',', $roleNames) ?: '-',
+                $flags ? '  ⚠ ' . implode('; ', $flags) : ''
+            );
         }
 
         echo "=== USERS: {$total} total ===\n";
@@ -140,9 +137,9 @@ class ProdInventoryTool extends CommandLineTool
         }
         echo "\n\n";
 
-        echo 'Potential test users (' . count($suspects) . "):\n";
-        foreach ($suspects as $s) {
-            echo $s . "\n";
+        echo "All users (⚠ = heuristic hint for test account, ignore if incorrect):\n";
+        foreach ($rows as $r) {
+            echo $r . "\n";
         }
     }
 
