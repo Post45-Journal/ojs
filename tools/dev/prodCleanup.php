@@ -38,10 +38,13 @@
  * lives in a plugin's schema and isn't part of core's cascade.
  */
 
+use APP\core\Application;
 use APP\facades\Repo;
 use APP\plugins\generic\post45NotionSync\classes\repository\SyncStateRepository;
 use Illuminate\Support\Facades\DB;
 use PKP\cliTool\CommandLineTool;
+use PKP\context\Context;
+use PKP\db\DAORegistry;
 use PKP\security\Role;
 
 require(dirname(__FILE__) . '/../bootstrap.php');
@@ -122,6 +125,13 @@ TXT;
         }
 
         $this->info($this->confirm ? '=== LIVE RUN (writes are real) ===' : '=== DRY RUN (nothing will be written; add --confirm to actually delete) ===');
+
+        // CLI scripts run without a request context. Repo::submission()->delete()
+        // cascades into submission-file deletes, which fire
+        // PendingRevisionsNotificationManager::updateNotification — that
+        // manager calls $request->getContext()->getId() and blows up on null.
+        // Same worker-context gotcha jobs hit; see OJS-DEV-NOTES.md.
+        $this->installRequestContext();
 
         // Safety pass BEFORE any writes.
         $this->safetyChecks();
@@ -276,6 +286,17 @@ TXT;
     }
 
     // ---------- Helpers ----------
+
+    private function installRequestContext(): void
+    {
+        /** @var \APP\journal\JournalDAO $journalDao */
+        $journalDao = DAORegistry::getDAO('JournalDAO');
+        $context = $journalDao->getById(self::CONTEXT_ID);
+        if (!$context instanceof Context) {
+            $this->die(sprintf('Context id=%d not found; cannot install request context.', self::CONTEXT_ID));
+        }
+        Application::get()->getRequest()->getRouter()->_context = $context;
+    }
 
     private function forgetLedgerRow(string $entityType, int $entityId): void
     {
