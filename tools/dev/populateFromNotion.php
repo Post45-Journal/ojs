@@ -46,8 +46,6 @@
  *
  *   - Upload manuscript files. User is undecided on file source + Notion/Drive
  *     backup pattern. Every populated submission arrives file-less.
- *   - Assign copyeditors. Per-copyeditor filter design landed but the
- *     assignment mechanics are TODO.
  *   - Create special-issue sections + invite guest editors. Detected but
  *     currently routed to the default section with a warning.
  *   - Full ledger baseline (payload + hash). Only the page id is stamped; the
@@ -60,12 +58,14 @@
 use APP\core\Application;
 use APP\decision\Decision;
 use APP\facades\Repo;
+use APP\plugins\generic\post45Editorial\classes\settings\Post45SubmissionSettingsRepository;
 use APP\plugins\generic\post45NotionSync\classes\mapping\ArticleSchema;
 use APP\plugins\generic\post45NotionSync\classes\mapping\PeopleSchema;
 use APP\plugins\generic\post45NotionSync\classes\mapping\ReadersReportsSchema;
 use APP\plugins\generic\post45NotionSync\classes\notion\NotionApiException;
 use APP\plugins\generic\post45NotionSync\classes\notion\NotionClient;
 use APP\plugins\generic\post45NotionSync\classes\repository\SyncStateRepository;
+use APP\plugins\generic\post45NotionSync\classes\settings\Post45NotionSyncSettingsForm;
 use APP\submission\Submission;
 use PKP\cliTool\CommandLineTool;
 use PKP\controllers\grid\users\reviewer\form\traits\HasReviewDueDate;
@@ -114,6 +114,30 @@ class PopulateFromNotionTool extends CommandLineTool
         'Second Edit in Progress',
         'Copyedits Ready to Send',
         'Edits With Author',
+    ];
+
+    // Notion Copy Editing Status -> OJS copyeditingSubstatus enum
+    // (SchemaHook::COPYEDITING_SUBSTATUS_VALUES). Sync's write direction turns
+    // this back into Notion's CE Status column, so setting it right here means
+    // the first post-cutover sync is a no-op instead of blanking the column.
+    //
+    // "Copyedits Ready to Send" has no direct OJS equivalent — Post45's OJS
+    // model transitions second_edit_in_progress -> copyedits_with_author on the
+    // "send to author" action, no intermediate "ready but not sent" state.
+    // Mapped to second_edit_in_progress (still working, about to send) rather
+    // than copyedits_with_author (which would falsely claim it's been sent);
+    // editor can flip to copyedits_with_author in the OJS panel once they do
+    // send. The reverse-mapping loss on sync-back is acceptable — Notion
+    // becomes the second-order historical record post-cutover.
+    private const NOTION_CE_STATUS_TO_SUBSTATUS = [
+        'Received' => 'manuscript_received',
+        'First Edit in Progress' => 'first_edit_in_progress',
+        'Second Edit in Progress' => 'second_edit_in_progress',
+        'Copyedits Ready to Send' => 'second_edit_in_progress',
+        'Edits With Author' => 'copyedits_with_author',
+        'Preparing Proofs' => 'preparing_proofs',
+        'Proofs with Author' => 'proofs_with_author',
+        'Ready for Publication' => 'ready_for_publication',
     ];
 
     // Statuses that mean "already on WordPress" — always skip.
@@ -222,6 +246,11 @@ class PopulateFromNotionTool extends CommandLineTool
     /** @var array<string, array<int, array<string, string>>> notion_rr_id -> rows */
     private array $manifestByRr = [];
     private ?array $genreCache = null;
+
+    /** Notion workspace member id => OJS user id, inverted from plugin settings. */
+    private ?array $copyeditorPairingsCache = null;
+    /** Notion user id => user array from GET /v1/users/{id}, or null when the retrieve failed. */
+    private array $notionUserByIdCache = [];
 
     public function __construct($argv = [])
     {
@@ -627,9 +656,22 @@ TXT;
             $this->populateReviews($submissionId, $reviewRoundId, $reviewIds);
         }
 
-        // TODO(g3b-copyeditor): if $targetStage >= WORKFLOW_STAGE_ID_EDITING,
-        // read `Assigned to` off the article, resolve the OJS user, assign as
-        // Copyeditor on stage 4. Design detail deferred — see backlog.
+        // Copyeditor assignment for stage-4+ articles. `Assigned to` at these
+        // stages is the copyeditor (post-AssignFirstEdit currentOwner);
+        // resolveCopyeditorFromNotion reverses the Notion-user -> OJS-user
+        // gap AssignedToResolver bridges the other way. Silent no-op when the
+        // Notion cell is empty, or when the resolver can't match a Notion
+        // member to an OJS user (WARNING emitted inside).
+        if ($targetStage >= WORKFLOW_STAGE_ID_EDITING) {
+            $copyeditor = $this->resolveCopyeditorFromNotion($article);
+            if ($copyeditor) {
+                $this->assignCopyeditorToSubmission($submissionId, $copyeditor);
+                if ($this->verbose) {
+                    $this->info('         copyeditor assigned: ' . $copyeditor->getEmail() . " (user_id={$copyeditor->getId()})");
+                }
+            }
+            $this->writeCopyeditingSubstatus($submissionId, $ceStatus);
+        }
 
         // Manifest-driven file uploads (submission-level; reviewer reports
         // are handled inside populateReviews). No-op when no manifest is
@@ -1089,6 +1131,201 @@ TXT;
             false,
             true
         );
+    }
+
+    /**
+     * Inverted plugin-settings pairings: `{notionUserId: ojsUserId}`. Cached
+     * for the run. A single OJS user paired to two Notion members is a config
+     * error but flip is deterministic (last-write-wins), so the caller gets a
+     * consistent (if potentially wrong) answer rather than a crash. Users
+     * would notice the wrong copyeditor on the wrong article at verification.
+     *
+     * @return array<string, int>
+     */
+    private function copyeditorPairings(): array
+    {
+        if ($this->copyeditorPairingsCache !== null) {
+            return $this->copyeditorPairingsCache;
+        }
+        $plugin = PluginRegistry::getPlugin('generic', 'post45notionsyncplugin');
+        $forward = (new Post45NotionSyncSettingsForm($plugin, self::CONTEXT_ID))->assignedToPairings();
+        $inverted = [];
+        foreach ($forward as $ojsId => $notionId) {
+            $inverted[$notionId] = (int) $ojsId;
+        }
+        return $this->copyeditorPairingsCache = $inverted;
+    }
+
+    /**
+     * Retrieve a single Notion user by id, cached per run. Uses GET /v1/users/{id}
+     * rather than the workspace list because Post45's workspace is one member +
+     * everyone-else-guest; the bulk `listAllUsers` endpoint only returns members,
+     * so a guest with a matching OJS email would never resolve via the bulk list
+     * even though `retrieveUser` returns their profile happily. Null result is
+     * cached too — a 404 or 403 shouldn't refire on every subsequent article.
+     */
+    private function notionUserById(string $notionUserId): ?array
+    {
+        if (array_key_exists($notionUserId, $this->notionUserByIdCache)) {
+            return $this->notionUserByIdCache[$notionUserId];
+        }
+        try {
+            return $this->notionUserByIdCache[$notionUserId] = $this->notion->retrieveUser($notionUserId);
+        } catch (NotionApiException $e) {
+            return $this->notionUserByIdCache[$notionUserId] = null;
+        }
+    }
+
+    /**
+     * Reverse-lookup for the Notion `Assigned to` cell → OJS user, mirroring
+     * AssignedToResolver's resolution order but going the other direction.
+     *
+     * Only the FIRST Notion member id in the cell is consulted; Post45 practice
+     * is a single owner per article at any moment. If a cell has more than one
+     * name the extra ones are ignored (would surface in the audit as data-shape
+     * to fix, not a populate bug).
+     *
+     * Resolution:
+     *   1. Stored pairings (inverted `{notionUserId: ojsUserId}` from the plugin
+     *      settings). Wins over the auto-match so a JM's explicit pairing beats
+     *      an unlucky email collision.
+     *   2. Auto-match by email: workspace member's email → OJS user by email.
+     *   3. Give up (WARNING). The article still gets populated; it just has no
+     *      copyeditor assignment until an editor picks one in the OJS UI.
+     */
+    private function resolveCopyeditorFromNotion(array $article): ?\PKP\user\User
+    {
+        $assignedIds = $this->readPeople($article, ArticleSchema::ASSIGNED_TO);
+        if (empty($assignedIds)) {
+            return null;
+        }
+        $notionUserId = $assignedIds[0];
+
+        $pairings = $this->copyeditorPairings();
+        if (isset($pairings[$notionUserId])) {
+            return Repo::user()->get($pairings[$notionUserId]);
+        }
+
+        $member = $this->notionUserById($notionUserId);
+        if (!$member || ($member['type'] ?? '') !== 'person') {
+            fwrite(STDERR, "         WARNING: Assigned to member {$notionUserId} could not be retrieved (or is a bot); skipping copyeditor assignment.\n");
+            return null;
+        }
+        $email = trim((string) ($member['person']['email'] ?? ''));
+        if ($email === '') {
+            fwrite(STDERR, "         WARNING: Assigned to member {$notionUserId} has no email; skipping copyeditor assignment.\n");
+            return null;
+        }
+        $user = Repo::user()->getByEmail($email);
+        if (!$user) {
+            fwrite(STDERR, "         WARNING: no OJS user with email {$email} for Notion member {$notionUserId}; skipping copyeditor assignment.\n");
+            return null;
+        }
+        return $user;
+    }
+
+    /**
+     * Assign the resolved user as the submission's copyeditor at stage 4.
+     *
+     * Copyediting is permission-driven, NOT role-locked: any user_group the JM
+     * has authorized on the Copyediting stage (Users & Roles → Roles) is a
+     * legitimate copyeditor. Post45 practice is that Managing Editors,
+     * Co-Editors, Section Editors and Copyeditors all pitch in — see
+     * AssignsCopyeditorForEdit's docblock for the design principle. Populate
+     * therefore uses whatever stage-4-authorized group the resolved user
+     * already has, without inventing a new role membership.
+     *
+     * If the user has no stage-4-authorized group, that is a real JM setup
+     * gap (they can't be a copyeditor in OJS's model): WARNING and skip the
+     * assignment. Silently promoting them to Assistant would paper over the
+     * gap and hide it from the editorial team at cutover.
+     *
+     * Sets `currentOwner` via Post45SubmissionSettingsRepository so the first
+     * post-cutover sync writes the correct `Assigned to` back to Notion (a
+     * null currentOwner would blank the cell — CLEAR outcome in
+     * AssignedToResolver terms). Skipped when no assignment lands.
+     *
+     * Idempotent: a duplicate stage_assignment is skipped, and
+     * setCurrentOwner is a no-op when the value already matches.
+     */
+    private function assignCopyeditorToSubmission(int $submissionId, \PKP\user\User $copyeditor): void
+    {
+        // Stage-4-authorized user_group ids in this context, minus Author —
+        // exactly what AssignsCopyeditorForEdit::getEditorialCandidateIds uses
+        // when the editor picks a copyeditor from the UI.
+        $authorizedGroupIds = Repo::userGroup()
+            ->getUserGroupsByStage($this->context->getId(), WORKFLOW_STAGE_ID_EDITING)
+            ->reject(fn ($group) => (int) $group->roleId === Role::ROLE_ID_AUTHOR)
+            ->map(fn ($group) => (int) $group->id)
+            ->values()
+            ->all();
+        if ($authorizedGroupIds === []) {
+            fwrite(STDERR, "         WARNING: no user_groups authorized on Copyediting stage in this context; skipping copyeditor assignment.\n");
+            return;
+        }
+
+        // Which of the resolved user's groups is authorized on stage 4? Any
+        // one is fine — the stage_assignment just needs to be under a group
+        // the JM has said can operate there.
+        $userGroup = Repo::userGroup()
+            ->userUserGroups($copyeditor->getId(), $this->context->getId())
+            ->first(fn ($g) => in_array((int) $g->id, $authorizedGroupIds, true));
+        if (!$userGroup) {
+            fwrite(STDERR, sprintf(
+                "         WARNING: user %s (id=%d) has no user_group authorized on Copyediting stage; fix in Users & Roles before OJS can list them as a copyeditor. Skipping copyeditor assignment for submission %d.\n",
+                $copyeditor->getEmail(),
+                $copyeditor->getId(),
+                $submissionId,
+            ));
+            return;
+        }
+
+        $already = \PKP\stageAssignment\StageAssignment::withSubmissionIds([$submissionId])
+            ->withUserId($copyeditor->getId())
+            ->withUserGroupId($userGroup->id)
+            ->get()
+            ->isNotEmpty();
+        if (!$already) {
+            Repo::stageAssignment()->build(
+                $submissionId,
+                $userGroup->id,
+                $copyeditor->getId(),
+                false,
+                false
+            );
+        }
+
+        // Set currentOwner so post-cutover sync's OJS -> Notion write for
+        // `Assigned to` matches what Notion already shows. Without this the
+        // first sync would write CLEAR (empty people list) over the current
+        // Notion value.
+        $submission = Repo::submission()->get($submissionId);
+        (new Post45SubmissionSettingsRepository())
+            ->setCurrentOwner($submission, (int) $copyeditor->getId());
+    }
+
+    /**
+     * Write copyeditingSubstatus from the article's Notion CE Status. Without
+     * this the post45Editorial state panel shows the "Awaiting the
+     * copyediting-ready manuscript from the author." fallback on every
+     * populated stage-4/5 article regardless of actual state, AND the first
+     * post-cutover sync would write null into Notion's CE Status column.
+     *
+     * Silent no-op when the status has no OJS equivalent (unknown values or
+     * pre-stage-4 values that pre-date entry into the copyediting subflow).
+     */
+    private function writeCopyeditingSubstatus(int $submissionId, ?string $ceStatus): void
+    {
+        if ($ceStatus === null || !isset(self::NOTION_CE_STATUS_TO_SUBSTATUS[$ceStatus])) {
+            return;
+        }
+        $substatus = self::NOTION_CE_STATUS_TO_SUBSTATUS[$ceStatus];
+        $submission = Repo::submission()->get($submissionId);
+        (new Post45SubmissionSettingsRepository())
+            ->setCopyeditingSubstatus($submission, $substatus);
+        if ($this->verbose) {
+            $this->info("         copyediting substatus: {$substatus} (from Notion CE={$ceStatus})");
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -2289,6 +2526,20 @@ TXT;
         $prop = $page['properties'][$name] ?? null;
         $items = $prop['relation'] ?? [];
         return array_column($items, 'id');
+    }
+
+    /**
+     * Read a Notion `people`-typed property, returning the workspace member ids
+     * in order. Used for `Assigned to` — a different identity space from OJS
+     * users (see AssignedToResolver's docblock).
+     *
+     * @return string[]
+     */
+    private function readPeople(array $page, string $name): array
+    {
+        $prop = $page['properties'][$name] ?? null;
+        $items = $prop['people'] ?? [];
+        return array_values(array_filter(array_column($items, 'id')));
     }
 
     /**
