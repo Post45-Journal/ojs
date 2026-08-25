@@ -1132,7 +1132,13 @@ TXT;
         $reviewRound = DAORegistry::getDAO('ReviewRoundDAO')->getById($reviewRoundId);
         $request = Application::get()->getRequest();
         $editorAction = new EditorAction();
-        [$reviewDue, $responseDue] = $this->getDueDates($this->context);
+        // Fallback deadlines when the R.R. page has no Due Date (unlikely — it's
+        // a formula on Date Requested — but a reviewer created outside the
+        // normal flow could have Date Requested blank). Response due has no
+        // Notion analogue; it stays at the journal default regardless.
+        [$defaultReviewDueTs, $defaultResponseDueTs] = $this->getDueDates($this->context);
+        $defaultReviewDue = Core::getCurrentDate($defaultReviewDueTs);
+        $responseDue = Core::getCurrentDate($defaultResponseDueTs);
 
         foreach ($rrPageIds as $rrPageId) {
             try {
@@ -1184,13 +1190,18 @@ TXT;
                 continue;
             }
 
+            // Carry the deadline the reviewer was actually shown in Notion so
+            // overdue reviewers surface as overdue in OJS. `Due Date` is a
+            // Notion formula, blank only if Date Requested is missing.
+            $reviewDue = $this->readDate($rr, ReadersReportsSchema::DUE_DATE) ?? $defaultReviewDue;
+
             $editorAction->addReviewer(
                 $request,
                 $submission,
                 $reviewerUser->getId(),
                 $reviewRound,
-                Core::getCurrentDate($reviewDue),
-                Core::getCurrentDate($responseDue),
+                $reviewDue,
+                $responseDue,
                 // Post45 is always double-anonymous. Not relying on journal
                 // default because populate has run against wrongly-configured
                 // journal settings before; explicit avoids the trap.
@@ -2226,7 +2237,12 @@ TXT;
     private function readDate(array $page, string $name): ?string
     {
         $prop = $page['properties'][$name] ?? null;
-        $iso = $prop['date']['start'] ?? null;
+        // Notion date columns expose `date.start`; formula columns whose result
+        // is a date wrap the same shape under `formula.date.start` (e.g. R.R.
+        // Due Date, computed from Date Requested).
+        $iso = $prop['date']['start']
+            ?? $prop['formula']['date']['start']
+            ?? null;
         if (!$iso) {
             return null;
         }
