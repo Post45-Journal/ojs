@@ -610,16 +610,15 @@ TXT;
         $this->populateSubmissionFiles($submissionId, $notionId, $reviewRoundId, $primaryAuthor);
 
         // Stamp the ledger so post-cutover sync finds the pages instead of
-        // duplicating them. Only page id is stamped: no payload/hash, so the
-        // first sync builds the payload, PATCHes the page (harmless — Notion
-        // is source of truth for this data), and records the baseline.
-        // TODO(g3b-baseline): compute the full payload + hash here for a true
-        // zero-write first sync.
-        $this->articleLedger->recordSync(
+        // duplicating them. Only page id is stamped — the baseline payload
+        // gets written by stampBaselines.php between populate and cutover,
+        // which runs the real synchronizer and reconciles round-trip loss
+        // between populate's Notion -> OJS mapping and sync's OJS -> Notion
+        // mapping. See tools/dev/stampBaselines.php.
+        $this->articleLedger->recordPageId(
             SyncStateRepository::ENTITY_SUBMISSION,
             $submissionId,
-            $notionId,
-            []
+            $notionId
         );
 
         $this->info("         submission_id={$submissionId} authors=" . count($authorUsers)
@@ -898,11 +897,10 @@ TXT;
 
     private function stampPeopleLedger(int $userId, string $peoplePageId): void
     {
-        $this->peopleLedger->recordSync(
+        $this->peopleLedger->recordPageId(
             SyncStateRepository::ENTITY_USER,
             $userId,
-            $peoplePageId,
-            []
+            $peoplePageId
         );
     }
 
@@ -1241,12 +1239,12 @@ TXT;
             $this->summary['reviews_created']++;
 
             // Stamp the R.R. ledger so the first post-cutover Review sync
-            // finds the page instead of duplicating it.
-            $this->rrLedger->recordSync(
+            // finds the page instead of duplicating it. Baseline payload gets
+            // written by stampBaselines.php between populate and cutover.
+            $this->rrLedger->recordPageId(
                 SyncStateRepository::ENTITY_REVIEW_ASSIGNMENT,
                 $assignment->getId(),
-                $rrPageId,
-                []
+                $rrPageId
             );
 
             // Manifest-driven reviewer-report file upload. No-op when no
