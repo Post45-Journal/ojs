@@ -382,6 +382,8 @@ TXT;
         $_GET['skipEmail'] = 1;
         Application::get()->getRequest()->_requestVars = null;
 
+        $this->silenceMailers();
+
         // Generic plugins register per-context. Populating goes through
         // post45Editorial decisions (Request Desk Revision id 998, tagged
         // upload hooks, etc.), so re-register the plugin against this
@@ -424,6 +426,31 @@ TXT;
         if (!$this->defaultSection) {
             $this->die("Journal '{$this->context->getPath()}' has no sections. Create one before populating.");
         }
+    }
+
+    /**
+     * Swap the default mailer to an in-memory sink for this process. Populate
+     * creates users, adds reviewers, records decisions and uploads files —
+     * every one of which can cascade into a notification email. On dev with
+     * `[email] default = log`, those get dumped to the terminal via errorlog
+     * and flood scrollback past the useful populate output. `skipEmail=1`
+     * covers the reviewer-invite path explicitly but not every downstream
+     * cascade; the array-transport swap catches the rest.
+     *
+     * The `array` transport captures messages in memory without delivering
+     * or logging. Scoped to this process — a real request restores the
+     * config-driven default from PKPContainer.
+     */
+    private function silenceMailers(): void
+    {
+        config([
+            'mail.mailers.silent' => ['transport' => 'array'],
+            'mail.default' => 'silent',
+        ]);
+        // Drop any mailer instance the container may already have resolved
+        // so subsequent Mail::* calls pick up the new default. Cheap even
+        // if nothing has been resolved yet.
+        app('mail.manager')->forgetMailers();
     }
 
     /**
