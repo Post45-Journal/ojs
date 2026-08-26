@@ -36,7 +36,12 @@
  *   - One OJS Submission + Publication in the correct section
  *   - Author records + user accounts (never notifying; signup mail suppressed)
  *   - Editorial decisions to drive the submission to its target workflow stage
- *   - Review assignments for each non-Done Reader's Report
+ *   - Review assignments for each Reader's Report we have data on. Active
+ *     reviewers get an open assignment; completed pre-cutover reviewers
+ *     get a silent OJS account + a closed assignment with `dateCompleted`
+ *     set from Notion's `Date Received`, so their report lives in the
+ *     normal review UI (Review Attachment on their assignment) rather
+ *     than as an orphan submission attachment.
  *   - Ledger entries in post45_notion_sync_state pointing OJS -> Notion, so
  *     the first sync post-cutover finds the pages instead of duplicating them
  *
@@ -157,8 +162,11 @@ class PopulateFromNotionTool extends CommandLineTool
     // (legacy Notion stays live as `LEGACY — DO NOT USE`).
     private const DECISION_SKIP = ['Reject', 'Withdrawn'];
 
-    // R.R. Status values that mean the reviewer's work is complete — no
-    // OJS account + no review assignment needed.
+    // R.R. Status values where, IF we also have no manifest file, we skip
+    // the R.R. entirely (no OJS evidence at all; Notion legacy is the
+    // record). A Done R.R. WITH a manifest file follows the normal
+    // create-account + create-assignment path; the assignment is marked
+    // complete via `dateCompleted` from Notion's `Date Received`.
     private const RR_SKIP = ['Done'];
 
     // Property name on the Notion Special Issues DB that carries the SI's
@@ -1666,16 +1674,26 @@ TXT;
                 continue;
             }
 
-            // ROUTING: manifest file presence is authoritative for "is this
-            // reviewer's work complete", overriding Notion status (which can
-            // lag reality — a report may have arrived by email since the last
-            // Notion update). See EDITOR-NOTES / [[project_ojs_operational_notion_historical]].
+            // ROUTING (updated 2026-08-26 — Option B'): manifest file presence
+            // and Notion status together classify the R.R.:
             //
-            //   manifest has file  -> upload file, NO reviewer account (they're done)
-            //   manifest blank + Notion Done  -> skip (nothing to do)
-            //   manifest blank + Notion not-Done -> create reviewer + assignment (they're active)
+            //   manifest has file → create reviewer + assignment; dateCompleted
+            //                       set from Notion Date Received if present.
+            //                       Report file lands in Review Attachment on
+            //                       the assignment (its natural home).
+            //   manifest blank + Notion Done → skip entirely (no OJS evidence;
+            //                                  Notion legacy remains the record).
+            //   manifest blank + Notion not-Done → create reviewer + open
+            //                                       assignment (active).
+            //
+            // Rationale: Option B' silently creates OJS accounts for completed
+            // pre-cutover reviewers so their report attribution is first-class
+            // + they can be invited normally next time + future queries
+            // (Editorial Events sync) treat them uniformly. Account is a
+            // normal user record with a random password; never notified.
+            // See EDITOR-NOTES for the editor-facing consequence.
             $manifestRow = null;
-            foreach ($this->manifestByRr[$rrPageId] ?? [] as $r) {
+            foreach ($this->manifestByRr[self::normalizeNotionId($rrPageId)] ?? [] as $r) {
                 if (!empty($r['file_path'])) {
                     $manifestRow = $r;
                     break;
@@ -1683,14 +1701,7 @@ TXT;
             }
             $status = $this->readSelect($rr, ReadersReportsSchema::STATUS);
 
-            if ($manifestRow !== null) {
-                // Have file → attach as generic submission attachment, no
-                // reviewer created. Same shape as reader_reports uploads.
-                $this->attachCompletedReviewerReport($submission, $manifestRow, $rrPageId);
-                continue;
-            }
-
-            if ($status !== null && in_array($status, self::RR_SKIP, true)) {
+            if ($manifestRow === null && $status !== null && in_array($status, self::RR_SKIP, true)) {
                 if ($this->verbose) {
                     $this->info('         R.R. [' . substr($rrPageId, 0, 8) . "] status={$status} + no manifest file; skipping.");
                 }
@@ -1738,11 +1749,21 @@ TXT;
 
             // Mirror the R.R. state onto the assignment. The Notion status
             // semantics map onto OJS review-assignment dates:
-            //   - dateNotified: always (invitation was sent, in Notion terms)
-            //   - dateConfirmed: reviewer accepted (Notion "In Progress" or later)
-            //   - dateCompleted: reviewer submitted (Notion "Received" / equivalents)
+            //   - dateAssigned:  editor picked the reviewer (Notion Date Requested)
+            //   - dateNotified:  invitation email sent (same source; assign +
+            //                    notify happen together for Post45)
+            //   - dateConfirmed: reviewer accepted (Notion Date Accepted, or
+            //                    Date Requested for pre-2026-08-19 R.R.s)
+            //   - dateCompleted: reviewer submitted (Notion Date Received)
+            //
+            // dateAssigned override matters: EditorAction::addReviewer() above
+            // stamps it to NOW unconditionally, so without this override an
+            // imported historical review displays as if it was assigned today
+            // in review-round listings.
+            $requestedDate = $this->readDate($rr, ReadersReportsSchema::DATE_REQUESTED);
             $edits = [
-                'dateNotified' => $this->readDate($rr, ReadersReportsSchema::DATE_REQUESTED) ?? Core::getCurrentDate(),
+                'dateAssigned' => $requestedDate ?? Core::getCurrentDate(),
+                'dateNotified' => $requestedDate ?? Core::getCurrentDate(),
                 'reviewFormId' => null,
                 'considered' => ReviewAssignment::REVIEW_ASSIGNMENT_NEW,
             ];
@@ -1786,34 +1807,11 @@ TXT;
                 $rrPageId
             );
 
-            // TODO(g3b-review-content): if the Notion R.R. page body carries
-            // freeform review text (not just a file link), populating it into
-            // the OJS review submission form is worth doing. Deferred until
-            // we've eyeballed a sample of R.R. pages to see what shape the
-            // text actually takes.
-        }
-    }
-
-    /**
-     * A reviewer's report we've received but where we DON'T want to create
-     * an OJS account for the reviewer (their work is done — see file-presence
-     * routing in populateReviews).
-     *
-     * Piggybacks on uploadOneFile by coercing the kind to `other`: same
-     * fileStage (SUBMISSION_FILE_ATTACHMENT), same genre (OTHER), same
-     * download + storage path. Editor is the uploader.
-     */
-    private function attachCompletedReviewerReport(
-        \APP\submission\Submission $submission,
-        array $manifestRow,
-        string $rrPageId
-    ): void {
-        $modified = $manifestRow;
-        $modified['file_kind'] = 'other';
-        $this->uploadOneFile($modified, $submission, null, $this->editor, null);
-        if ($this->verbose) {
-            $this->info('         reviewer report for R.R. ' . substr($rrPageId, 0, 8)
-                . ' attached without creating reviewer account (file present in manifest)');
+            // Note: reviewer's actual review text is NOT populated into the
+            // OJS review submission form. Confirmed 2026-08-26 that Notion
+            // R.R. pages carry no free-text body — reviewers' reports live
+            // in the Report file upload, which the file-manifest workflow
+            // imports separately as a review-round file.
         }
     }
 
@@ -1913,10 +1911,10 @@ TXT;
                     fwrite(STDERR, "Manifest row {$rowNum}: file_kind=reviewer_report requires notion_rr_id; skipping.\n");
                     continue;
                 }
-                $this->manifestByRr[$assoc['notion_rr_id']][] = $assoc;
+                $this->manifestByRr[self::normalizeNotionId($assoc['notion_rr_id'])][] = $assoc;
                 continue;
             }
-            $this->manifestByArticle[$assoc['notion_page_id']][] = $assoc;
+            $this->manifestByArticle[self::normalizeNotionId($assoc['notion_page_id'])][] = $assoc;
         }
         fclose($fh);
 
@@ -1932,7 +1930,7 @@ TXT;
      */
     private function populateSubmissionFiles(int $submissionId, string $notionPageId, ?int $reviewRoundId, \PKP\user\User $primaryAuthor): void
     {
-        $rows = $this->manifestByArticle[$notionPageId] ?? [];
+        $rows = $this->manifestByArticle[self::normalizeNotionId($notionPageId)] ?? [];
         if (empty($rows)) {
             return;
         }
@@ -1959,7 +1957,7 @@ TXT;
         \PKP\user\User $reviewer,
         string $rrPageId
     ): void {
-        $rows = $this->manifestByRr[$rrPageId] ?? [];
+        $rows = $this->manifestByRr[self::normalizeNotionId($rrPageId)] ?? [];
         if (empty($rows)) {
             return;
         }
@@ -2856,6 +2854,21 @@ TXT;
     private static function singleLine(string $text): string
     {
         return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
+    }
+
+    /**
+     * Notion accepts and returns page IDs in two interchangeable forms:
+     * canonical UUID (32 hex + 4 hyphens, e.g. `2ad13c7d-3680-808f-...`) and
+     * hyphen-stripped (32 hex). Different sources of a manifest CSV can
+     * produce either — generated placeholders come out hyphenated because
+     * that's what the Notion API returns, but user hand-edits, spreadsheet
+     * merges, or ID pastes from URLs can produce the stripped form. Both
+     * refer to the same page. This normalizes to hyphen-stripped lowercase
+     * so index build and lookup can't miss each other on formatting alone.
+     */
+    private static function normalizeNotionId(string $id): string
+    {
+        return strtolower(str_replace('-', '', trim($id)));
     }
 
     /**
