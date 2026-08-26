@@ -46,8 +46,17 @@
  *
  *   - Upload manuscript files. User is undecided on file source + Notion/Drive
  *     backup pattern. Every populated submission arrives file-less.
- *   - Create special-issue sections + invite guest editors. Detected but
- *     currently routed to the default section with a warning.
+ *   - Create special-issue sections. The OJS section itself must be set up
+ *     by hand; populate reads the `specialIssuePairings` plugin setting to
+ *     route SI articles into the right pre-existing section. Unpaired SI
+ *     articles fall back to the default section with a WARNING.
+ *
+ *     Guest editors ARE handled: populate reads each paired SI's Notion
+ *     `Editors` relation, creates OJS accounts as needed, and assigns them
+ *     as Guest Editors on the mapped OJS section (writing directly to
+ *     `subeditor_submission_group`). The per-submission
+ *     `SubEditorsDAO::assignEditors()` call then produces the correct
+ *     StageAssignments automatically.
  *   - Full ledger baseline (payload + hash). Only the page id is stamped; the
  *     first sync post-cutover computes the payload, writes it (harmless: OJS
  *     state was derived from the same Notion page), and records the baseline.
@@ -66,6 +75,7 @@ use APP\plugins\generic\post45NotionSync\classes\notion\NotionApiException;
 use APP\plugins\generic\post45NotionSync\classes\notion\NotionClient;
 use APP\plugins\generic\post45NotionSync\classes\repository\SyncStateRepository;
 use APP\plugins\generic\post45NotionSync\classes\settings\Post45NotionSyncSettingsForm;
+use APP\plugins\generic\post45NotionSync\classes\sync\SpecialIssueResolver;
 use APP\submission\Submission;
 use PKP\cliTool\CommandLineTool;
 use PKP\controllers\grid\users\reviewer\form\traits\HasReviewDueDate;
@@ -151,6 +161,19 @@ class PopulateFromNotionTool extends CommandLineTool
     // OJS account + no review assignment needed.
     private const RR_SKIP = ['Done'];
 
+    // Property name on the Notion Special Issues DB that carries the SI's
+    // guest editors as a relation to People pages. Not a schema-class
+    // constant because populate is the only reader — the Special Issues DB
+    // is not a sync target (see [[project_special_issue_sync_backlog]]).
+    private const SI_EDITORS_PROPERTY = 'Editors';
+
+    // Localized name for the Guest Editor user_group. Post45 has two
+    // SUB_EDITOR user_groups (Section Editor, Guest Editor), so filtering
+    // by role_id alone would pick the wrong one. Match on the setting_value
+    // in user_group_settings, since the role was created via the UI (which
+    // stores the string here rather than a nameLocaleKey).
+    private const GUEST_EDITOR_NAME = 'Guest editor';
+
     // Manifest `file_kind` vocabulary — the vocabulary the user fills in the
     // CSV with — mapped to (OJS fileStage, OJS genre key, notes-for-humans).
     //
@@ -220,6 +243,11 @@ class PopulateFromNotionTool extends CommandLineTool
     private $context;
     private $editor;
     private $defaultSection;
+    private SpecialIssueResolver $specialIssueResolver;
+    /** @var array<string, int> Notion SI page id => OJS section id, from plugin settings. */
+    private array $specialIssuePairings = [];
+    /** section id => Section, for SI sections resolved from pairings. */
+    private array $sectionCache = [];
     private NotionClient $notion;
     private string $articlesDatabaseId;
     private string $peopleDatabaseId;
@@ -235,6 +263,8 @@ class PopulateFromNotionTool extends CommandLineTool
         'articles_failed' => 0,
         'users_created' => 0,
         'users_reused' => 0,
+        'guest_editors_assigned' => 0,
+        'guest_editors_already_present' => 0,
         'reviews_created' => 0,
         'files_uploaded' => 0,
         'files_missing' => 0,
@@ -352,6 +382,13 @@ TXT;
         $this->validateFilesArgs();
         $this->bootstrap();
         $this->preflight();
+        // Seed guest editors AFTER preflight — the People upserts write user
+        // ledger rows, which preflight refuses to see. `SubEditorsDAO::assignEditors()`
+        // (called per-submission by assignEditorToSubmission()) reads
+        // `subeditor_submission_group` and produces StageAssignments, so setting
+        // up the section's editors before the per-article loop lets OJS's own
+        // mechanism handle each submission's assignments.
+        $this->setupGuestEditorsForPairedSections($this->specialIssuePairings);
         $this->loadFilesManifest();
 
         $this->info("Fetching in-progress articles from Notion database {$this->articlesDatabaseId}");
@@ -455,6 +492,12 @@ TXT;
         if (!$this->defaultSection) {
             $this->die("Journal '{$this->context->getPath()}' has no sections. Create one before populating.");
         }
+
+        // Notion Special Issues page id -> OJS section id, from plugin
+        // settings. The JM curates this by hand; populate warns and routes
+        // to the default section on any unpaired SI (see resolveSection).
+        $this->specialIssuePairings = (new Post45NotionSyncSettingsForm($sync, self::CONTEXT_ID))->specialIssuePairings();
+        $this->specialIssueResolver = new SpecialIssueResolver($this->specialIssuePairings);
     }
 
     /**
@@ -832,25 +875,236 @@ TXT;
     // ---------------------------------------------------------------------
 
     /**
-     * Which OJS section this submission belongs in. Regular articles land in
-     * the default (first) section; special-issue articles SHOULD land in a
-     * per-SI section with the guest editor assigned to it.
+     * Which OJS section this submission belongs in.
      *
-     * TODO(g3b-special-issue): create the SI section on demand (read SI page
-     * title from Notion, upsert an OJS section, assign guest editors). Design
-     * discussion pending — see backlog G4.5 "Special-issue handling
-     * verification". For now, SI articles land in the default section with a
-     * loud warning.
+     * Regular articles land in the default (first) section. Special-issue
+     * articles are routed via the plugin's `specialIssuePairings` setting
+     * (Notion SI page id -> OJS section id); the OJS section itself must
+     * already exist, with its guest editors assigned. That matches the
+     * design choice to handle special issues manually — there are few of
+     * them, they're rare to create, and no reliable auto-match exists
+     * between an OJS section and a Notion SI page.
+     *
+     * Unpaired SI articles fall back to the default section with a WARNING.
+     * Skip would be safer against silent mis-routing, but with only a
+     * handful of SIs, forgetting to pair one shouldn't lose an article —
+     * the warning surfaces the omission and the JM can fix it and re-run.
      */
     private function resolveSection(array $article)
     {
         $specialIssueIds = $this->readRelation($article, ArticleSchema::SPECIAL_ISSUE);
-        if (!empty($specialIssueIds)) {
-            $siShort = substr($specialIssueIds[0], 0, 8);
-            fwrite(STDERR, "         WARNING: article belongs to special issue [{$siShort}] but SI section "
-                . "creation is TODO(g3b-special-issue); routing to default section.\n");
+        if (empty($specialIssueIds)) {
+            return $this->defaultSection;
         }
-        return $this->defaultSection;
+
+        $notionPageId = $specialIssueIds[0];
+        $sectionId = $this->specialIssueResolver->notionPageIdToSectionId($notionPageId);
+        if ($sectionId === null) {
+            $siShort = substr($notionPageId, 0, 8);
+            fwrite(STDERR, "         WARNING: article belongs to Notion Special Issue [{$siShort}] but no pairing "
+                . "exists in post45NotionSync's specialIssuePairings setting; routing to default section. "
+                . "Add the pairing (and the corresponding OJS section + guest editors) and re-run to fix.\n");
+            return $this->defaultSection;
+        }
+
+        $section = $this->getSection($sectionId, $notionPageId);
+        if ($this->verbose) {
+            $siShort = substr($notionPageId, 0, 8);
+            $this->info("         special issue: routed to section '{$section->getLocalizedTitle()}' (id={$sectionId}, notion [{$siShort}])");
+        }
+        return $section;
+    }
+
+    /**
+     * For every paired SI, read the Notion SI page's `Editors` relation and
+     * seed those People as OJS users + guest editors on the mapped section.
+     *
+     * Runs ONCE at bootstrap so `SubEditorsDAO::assignEditors()` (invoked
+     * per-submission later) sees the guest editors already present in
+     * `subeditor_submission_group` and produces the correct StageAssignments
+     * without any per-submission Notion lookup.
+     *
+     * Idempotent — `insertEditor` is skipped when a matching row already
+     * exists, and `assignGuestEditorRoleIfMissing` is a no-op when the user
+     * already carries the Guest Editor user_group in this context.
+     *
+     * @param array<string, int> $pairings Notion SI page id => OJS section id
+     */
+    private function setupGuestEditorsForPairedSections(array $pairings): void
+    {
+        if ($pairings === []) {
+            return;
+        }
+
+        $guestGroupId = $this->resolveGuestEditorUserGroupId();
+        $subEditorsDao = DAORegistry::getDAO('SubEditorsDAO');
+
+        foreach ($pairings as $notionSiPageId => $sectionId) {
+            // getSection dies loudly on a nonexistent section — matches the
+            // safety net in resolveSection so the JM sees the misconfig now
+            // rather than at first-article-in-that-SI.
+            $section = $this->getSection($sectionId, $notionSiPageId);
+            $siShort = substr($notionSiPageId, 0, 8);
+
+            try {
+                $siPage = $this->notion->retrievePage($notionSiPageId);
+            } catch (NotionApiException $e) {
+                fwrite(STDERR, "         WARNING: could not retrieve Notion SI [{$siShort}] to read Editors: "
+                    . $e->getMessage() . "\n");
+                continue;
+            }
+
+            $editorPageIds = $this->readRelation($siPage, self::SI_EDITORS_PROPERTY);
+            if ($editorPageIds === []) {
+                $this->info("SI [{$siShort}] '{$section->getLocalizedTitle()}': no editors on the Notion page; skipping.");
+                continue;
+            }
+
+            $assigned = 0;
+            $already = 0;
+            foreach ($editorPageIds as $editorPageId) {
+                $user = $this->upsertUserFromPeoplePage($editorPageId, []);
+                if (!$user) {
+                    continue;
+                }
+                $this->assignGuestEditorRoleIfMissing($user, $guestGroupId);
+
+                // Cannot use $subEditorsDao->editorExists() — its SQL still
+                // references a `section_id` column that pkp-lib renamed to
+                // assoc_id/assoc_type in 3.2.1, and its parameter binding is
+                // inverted. Upstream bug candidate (also affects deleteEditor).
+                // Direct query against the real schema instead.
+                $exists = \Illuminate\Support\Facades\DB::table('subeditor_submission_group')
+                    ->where('context_id', $this->context->getId())
+                    ->where('assoc_id', $sectionId)
+                    ->where('assoc_type', PKPApplication::ASSOC_TYPE_SECTION)
+                    ->where('user_id', $user->getId())
+                    ->where('user_group_id', $guestGroupId)
+                    ->exists();
+                if ($exists) {
+                    $already++;
+                    $this->summary['guest_editors_already_present']++;
+                    continue;
+                }
+
+                $subEditorsDao->insertEditor(
+                    $this->context->getId(),
+                    $sectionId,
+                    $user->getId(),
+                    PKPApplication::ASSOC_TYPE_SECTION,
+                    $guestGroupId
+                );
+                $assigned++;
+                $this->summary['guest_editors_assigned']++;
+            }
+
+            $this->info(sprintf(
+                "SI [%s] '%s': %d guest editor(s) assigned, %d already present.",
+                $siShort,
+                $section->getLocalizedTitle(),
+                $assigned,
+                $already
+            ));
+        }
+    }
+
+    /**
+     * The OJS user_group id for Guest Editor in this context.
+     *
+     * Post45 has TWO user_groups with role_id=SUB_EDITOR — Section Editor
+     * and Guest Editor — so filtering by role_id alone is ambiguous. Two
+     * discovery paths cover the two ways the role could have landed in the
+     * DB:
+     *
+     *   - `nameLocaleKey='default.groups.name.guestEditor'` — set when the
+     *     role comes in via the install migration.
+     *   - Localized name matches 'guest editor' (case-insensitive) — the
+     *     fallback for roles created through the admin UI, which leaves
+     *     `nameLocaleKey` NULL and stores the name string directly. Post45
+     *     re-created its roles via the UI after deleting the install
+     *     defaults (see project-level memory), so on this workspace the
+     *     UI path is what actually resolves.
+     *
+     * Cached across the run.
+     */
+    private ?int $guestEditorUserGroupIdCache = null;
+    private function resolveGuestEditorUserGroupId(): int
+    {
+        if ($this->guestEditorUserGroupIdCache !== null) {
+            return $this->guestEditorUserGroupIdCache;
+        }
+
+        // Query user_group_settings directly rather than going through
+        // Repo::userGroup()->getByRoleIds(), which returns a cursor whose
+        // settings aren't hydrated — every ORM read for a UI-created role's
+        // localized `name` comes back empty from that path. The name lives
+        // in user_group_settings.setting_value under setting_name='name',
+        // so join and match there.
+        $matches = \Illuminate\Support\Facades\DB::table('user_groups AS ug')
+            ->join('user_group_settings AS ugs', 'ugs.user_group_id', '=', 'ug.user_group_id')
+            ->where('ug.role_id', Role::ROLE_ID_SUB_EDITOR)
+            ->where('ug.context_id', $this->context->getId())
+            ->where('ugs.setting_name', 'name')
+            ->get(['ug.user_group_id AS id', 'ugs.setting_value AS name']);
+
+        $group = null;
+        foreach ($matches as $row) {
+            if (strcasecmp(trim((string) $row->name), self::GUEST_EDITOR_NAME) === 0) {
+                $group = $row;
+                break;
+            }
+        }
+
+        if (!$group) {
+            // Show what WAS found so the JM knows if they need to rename or
+            // create the role — the failure mode is silent otherwise.
+            $names = array_map(fn ($r) => '"' . $r->name . '"', $matches->all());
+            $listed = $names ? implode(', ', $names) : '(no SUB_EDITOR roles at all)';
+            $this->die(
+                'No Guest Editor user_group found in this context. Looked for a SUB_EDITOR '
+                . "user_group whose localized name is '" . self::GUEST_EDITOR_NAME . "'. "
+                . "Found instead: {$listed}. Create or rename the Guest Editor role in "
+                . 'Users & Roles → Roles.'
+            );
+        }
+        return $this->guestEditorUserGroupIdCache = (int) $group->id;
+    }
+
+    /**
+     * Assign the specific Guest Editor user_group to $user if they don't
+     * already carry it. Distinct from `assignRolesIfMissing()`, which
+     * matches by role_id and would pick Section Editor first (the earlier
+     * of Post45's two SUB_EDITOR user_groups).
+     */
+    private function assignGuestEditorRoleIfMissing(\PKP\user\User $user, int $guestGroupId): void
+    {
+        $has = Repo::userGroup()
+            ->userUserGroups($user->getId(), $this->context->getId())
+            ->first(fn ($g) => (int) $g->id === $guestGroupId);
+        if ($has) {
+            return;
+        }
+        Repo::userGroup()->assignUserToGroup($user->getId(), $guestGroupId);
+    }
+
+    /**
+     * Fetch (and cache) an OJS section by id, dying loudly if the pairing
+     * points at a section that does not exist. The JM entered the id by
+     * hand into plugin settings; a typo needs to be visible, not silent.
+     */
+    private function getSection(int $sectionId, string $notionPageId)
+    {
+        if (isset($this->sectionCache[$sectionId])) {
+            return $this->sectionCache[$sectionId];
+        }
+        $section = Repo::section()->get($sectionId, $this->context->getId());
+        if (!$section) {
+            $siShort = substr($notionPageId, 0, 8);
+            $this->die("specialIssuePairings maps Notion SI [{$siShort}] to OJS section id {$sectionId}, "
+                . "but no such section exists in journal '{$this->context->getPath()}'. Create the section "
+                . '(and assign its guest editors) or fix the pairing, then re-run.');
+        }
+        return $this->sectionCache[$sectionId] = $section;
     }
 
     // ---------------------------------------------------------------------
@@ -2642,6 +2896,8 @@ TXT;
         fwrite(STDERR, sprintf("  articles failed:          %d\n", $s['articles_failed']));
         fwrite(STDERR, sprintf("  users created:            %d\n", $s['users_created']));
         fwrite(STDERR, sprintf("  users reused:             %d\n", $s['users_reused']));
+        fwrite(STDERR, sprintf("  guest editors assigned:   %d\n", $s['guest_editors_assigned']));
+        fwrite(STDERR, sprintf("  guest editors present:    %d\n", $s['guest_editors_already_present']));
         fwrite(STDERR, sprintf("  review assignments:       %d\n", $s['reviews_created']));
     }
 }
