@@ -696,8 +696,12 @@ TXT;
 
         // Drive the submission to its target stage via real decisions, so
         // downstream state (review rounds, stage assignments) matches what
-        // the editorial UI would produce.
-        $reviewRoundId = $this->driveToStage($submissionId, $targetStage, $decision);
+        // the editorial UI would produce. The historical Decision Date from
+        // Notion travels with the ACCEPT decision (the only populate-created
+        // decision that reaches Notion) so the first post-cutover sync
+        // doesn't overwrite the real acceptance date with populate's run time.
+        $historicalDecisionDate = $this->readDate($article, ArticleSchema::DECISION_DATE);
+        $reviewRoundId = $this->driveToStage($submissionId, $targetStage, $decision, $historicalDecisionDate);
 
         // Review assignments: only for articles STILL IN REVIEW. A CE-stage
         // article's non-Done R.R.s are ghosts (reviewer never submitted, editor
@@ -708,20 +712,26 @@ TXT;
             $this->populateReviews($submissionId, $reviewRoundId, $reviewIds);
         }
 
-        // Copyeditor assignment for stage-4+ articles. `Assigned to` at these
-        // stages is the copyeditor (post-AssignFirstEdit currentOwner);
-        // resolveCopyeditorFromNotion reverses the Notion-user -> OJS-user
-        // gap AssignedToResolver bridges the other way. Silent no-op when the
-        // Notion cell is empty, or when the resolver can't match a Notion
-        // member to an OJS user (WARNING emitted inside).
-        if ($targetStage >= WORKFLOW_STAGE_ID_EDITING) {
-            $copyeditor = $this->resolveCopyeditorFromNotion($article);
-            if ($copyeditor) {
-                $this->assignCopyeditorToSubmission($submissionId, $copyeditor);
-                if ($this->verbose) {
-                    $this->info('         copyeditor assigned: ' . $copyeditor->getEmail() . " (user_id={$copyeditor->getId()})");
-                }
+        // Owner assignment from Notion's `Assigned to` cell — for every
+        // stage, not just stage 4+. Historically this only ran for stage 4+
+        // (because `Assigned to` at those stages is the copyeditor, which
+        // populate needs explicitly to reach the right OJS substatus). For
+        // stage 1-3 articles, populate previously left the OJS side with no
+        // `currentOwner` set — sync then wrote empty back to Notion,
+        // clearing the per-article assignee on the board.
+        // resolveAssignedToFromNotion reverses the Notion-user -> OJS-user
+        // gap AssignedToResolver bridges the other way. Silent no-op when
+        // the cell is empty or the resolver can't match a Notion member to
+        // an OJS user (WARNING emitted inside).
+        $assignedTo = $this->resolveAssignedToFromNotion($article);
+        if ($assignedTo) {
+            $this->assignSubmissionOwner($submissionId, $assignedTo, $targetStage);
+            if ($this->verbose) {
+                $this->info('         Assigned to: ' . $assignedTo->getEmail() . " (user_id={$assignedTo->getId()})");
             }
+        }
+
+        if ($targetStage >= WORKFLOW_STAGE_ID_EDITING) {
             $this->writeCopyeditingSubstatus($submissionId, $ceStatus);
         }
 
@@ -1467,6 +1477,11 @@ TXT;
     /**
      * Reverse-lookup for the Notion `Assigned to` cell → OJS user, mirroring
      * AssignedToResolver's resolution order but going the other direction.
+     * Stage-agnostic — used for every populated article regardless of the
+     * target stage, because sync writes `Assigned to` for every article.
+     * Historically called `resolveCopyeditorFromNotion` back when populate
+     * only cared about the assignee at stage 4+; renamed 2026-08-30 when the
+     * caller widened to every stage.
      *
      * Only the FIRST Notion member id in the cell is consulted; Post45 practice
      * is a single owner per article at any moment. If a cell has more than one
@@ -1479,9 +1494,9 @@ TXT;
      *      an unlucky email collision.
      *   2. Auto-match by email: workspace member's email → OJS user by email.
      *   3. Give up (WARNING). The article still gets populated; it just has no
-     *      copyeditor assignment until an editor picks one in the OJS UI.
+     *      owner assignment until an editor picks one in the OJS UI.
      */
-    private function resolveCopyeditorFromNotion(array $article): ?\PKP\user\User
+    private function resolveAssignedToFromNotion(array $article): ?\PKP\user\User
     {
         $assignedIds = $this->readPeople($article, ArticleSchema::ASSIGNED_TO);
         if (empty($assignedIds)) {
@@ -1496,80 +1511,82 @@ TXT;
 
         $member = $this->notionUserById($notionUserId);
         if (!$member || ($member['type'] ?? '') !== 'person') {
-            fwrite(STDERR, "         WARNING: Assigned to member {$notionUserId} could not be retrieved (or is a bot); skipping copyeditor assignment.\n");
+            fwrite(STDERR, "         WARNING: Assigned to member {$notionUserId} could not be retrieved (or is a bot); skipping Assigned-to assignment.\n");
             return null;
         }
         $email = trim((string) ($member['person']['email'] ?? ''));
         if ($email === '') {
-            fwrite(STDERR, "         WARNING: Assigned to member {$notionUserId} has no email; skipping copyeditor assignment.\n");
+            fwrite(STDERR, "         WARNING: Assigned to member {$notionUserId} has no email; skipping Assigned-to assignment.\n");
             return null;
         }
         $user = Repo::user()->getByEmail($email);
         if (!$user) {
-            fwrite(STDERR, "         WARNING: no OJS user with email {$email} for Notion member {$notionUserId}; skipping copyeditor assignment.\n");
+            fwrite(STDERR, "         WARNING: no OJS user with email {$email} for Notion member {$notionUserId}; skipping Assigned-to assignment.\n");
             return null;
         }
         return $user;
     }
 
     /**
-     * Assign the resolved user as the submission's copyeditor at stage 4.
+     * Assign $user as the submission's owner at $stageId — sets
+     * `currentOwner` (so post-cutover sync writes the correct `Assigned to`
+     * back to Notion rather than blanking the cell) and adds a
+     * stage_assignment under whichever of $user's existing user_groups is
+     * authorized on $stageId.
      *
-     * Copyediting is permission-driven, NOT role-locked: any user_group the JM
-     * has authorized on the Copyediting stage (Users & Roles → Roles) is a
-     * legitimate copyeditor. Post45 practice is that Managing Editors,
-     * Co-Editors, Section Editors and Copyeditors all pitch in — see
-     * AssignsCopyeditorForEdit's docblock for the design principle. Populate
-     * therefore uses whatever stage-4-authorized group the resolved user
-     * already has, without inventing a new role membership.
+     * Stage-agnostic. Assignment at every OJS stage is permission-driven,
+     * NOT role-locked: any user_group the JM has authorized on that stage
+     * (Users & Roles → Roles) is legitimate. Post45 practice is that
+     * Managing Editors, Journal Editors, Section Editors and Copyeditors all
+     * pitch in — see AssignsCopyeditorForEdit's docblock for the design
+     * principle. Populate therefore uses whatever authorized group the
+     * resolved user already has, without inventing a new role membership.
      *
-     * If the user has no stage-4-authorized group, that is a real JM setup
-     * gap (they can't be a copyeditor in OJS's model): WARNING and skip the
-     * assignment. Silently promoting them to Assistant would paper over the
-     * gap and hide it from the editorial team at cutover.
-     *
-     * Sets `currentOwner` via Post45SubmissionSettingsRepository so the first
-     * post-cutover sync writes the correct `Assigned to` back to Notion (a
-     * null currentOwner would blank the cell — CLEAR outcome in
-     * AssignedToResolver terms). Skipped when no assignment lands.
+     * If the user has no user_group authorized on $stageId, that is a real
+     * JM setup gap (they can't operate at that stage in OJS's model):
+     * WARNING and skip the assignment. Silently promoting them would paper
+     * over the gap and hide it from the editorial team at cutover.
      *
      * Idempotent: a duplicate stage_assignment is skipped, and
      * setCurrentOwner is a no-op when the value already matches.
+     *
+     * Historically called `assignCopyeditorToSubmission` and hardcoded
+     * WORKFLOW_STAGE_ID_EDITING; renamed and parameterized 2026-08-30 when
+     * the caller widened to every stage (Assigned-to on stage 1-3 was being
+     * dropped by populate and cleared by sync as a result).
      */
-    private function assignCopyeditorToSubmission(int $submissionId, \PKP\user\User $copyeditor): void
+    private function assignSubmissionOwner(int $submissionId, \PKP\user\User $user, int $stageId): void
     {
-        // Stage-4-authorized user_group ids in this context, minus Author —
-        // exactly what AssignsCopyeditorForEdit::getEditorialCandidateIds uses
-        // when the editor picks a copyeditor from the UI.
         $authorizedGroupIds = Repo::userGroup()
-            ->getUserGroupsByStage($this->context->getId(), WORKFLOW_STAGE_ID_EDITING)
+            ->getUserGroupsByStage($this->context->getId(), $stageId)
             ->reject(fn ($group) => (int) $group->roleId === Role::ROLE_ID_AUTHOR)
             ->map(fn ($group) => (int) $group->id)
             ->values()
             ->all();
         if ($authorizedGroupIds === []) {
-            fwrite(STDERR, "         WARNING: no user_groups authorized on Copyediting stage in this context; skipping copyeditor assignment.\n");
+            fwrite(STDERR, "         WARNING: no user_groups authorized on stage {$stageId} in this context; skipping Assigned-to assignment.\n");
             return;
         }
 
-        // Which of the resolved user's groups is authorized on stage 4? Any
-        // one is fine — the stage_assignment just needs to be under a group
-        // the JM has said can operate there.
+        // Which of the resolved user's groups is authorized on this stage?
+        // Any one is fine — the stage_assignment just needs to be under a
+        // group the JM has said can operate there.
         $userGroup = Repo::userGroup()
-            ->userUserGroups($copyeditor->getId(), $this->context->getId())
+            ->userUserGroups($user->getId(), $this->context->getId())
             ->first(fn ($g) => in_array((int) $g->id, $authorizedGroupIds, true));
         if (!$userGroup) {
             fwrite(STDERR, sprintf(
-                "         WARNING: user %s (id=%d) has no user_group authorized on Copyediting stage; fix in Users & Roles before OJS can list them as a copyeditor. Skipping copyeditor assignment for submission %d.\n",
-                $copyeditor->getEmail(),
-                $copyeditor->getId(),
+                "         WARNING: user %s (id=%d) has no user_group authorized on stage %d; fix in Users & Roles before OJS can list them there. Skipping Assigned-to assignment for submission %d.\n",
+                $user->getEmail(),
+                $user->getId(),
+                $stageId,
                 $submissionId,
             ));
             return;
         }
 
         $already = \PKP\stageAssignment\StageAssignment::withSubmissionIds([$submissionId])
-            ->withUserId($copyeditor->getId())
+            ->withUserId($user->getId())
             ->withUserGroupId($userGroup->id)
             ->get()
             ->isNotEmpty();
@@ -1577,19 +1594,15 @@ TXT;
             Repo::stageAssignment()->build(
                 $submissionId,
                 $userGroup->id,
-                $copyeditor->getId(),
+                $user->getId(),
                 false,
                 false
             );
         }
 
-        // Set currentOwner so post-cutover sync's OJS -> Notion write for
-        // `Assigned to` matches what Notion already shows. Without this the
-        // first sync would write CLEAR (empty people list) over the current
-        // Notion value.
         $submission = Repo::submission()->get($submissionId);
         (new Post45SubmissionSettingsRepository())
-            ->setCurrentOwner($submission, (int) $copyeditor->getId());
+            ->setCurrentOwner($submission, (int) $user->getId());
     }
 
     /**
@@ -1626,14 +1639,16 @@ TXT;
      * reviewRoundId if the submission ended at stage 3+, else null (for the
      * reviewer-assignment step to hang R.R. pages on).
      */
-    private function driveToStage(int $submissionId, int $targetStage, ?string $decision): ?int
+    private function driveToStage(int $submissionId, int $targetStage, ?string $decision, ?string $historicalDecisionDate = null): ?int
     {
         if ($targetStage === WORKFLOW_STAGE_ID_SUBMISSION) {
             return null;
         }
 
         // Every path stage-3+ starts with Send for External Review, which
-        // also creates review round 1.
+        // also creates review round 1. EXTERNAL_REVIEW is DELIBERATELY_IGNORED
+        // by the sync's DecisionMapper, so its date never reaches Notion —
+        // Core::getCurrentDate() is fine here.
         $this->recordDecision($submissionId, Decision::EXTERNAL_REVIEW, WORKFLOW_STAGE_ID_SUBMISSION);
         $reviewRound = DAORegistry::getDAO('ReviewRoundDAO')
             ->getLastReviewRoundBySubmissionId($submissionId, WORKFLOW_STAGE_ID_EXTERNAL_REVIEW);
@@ -1643,20 +1658,37 @@ TXT;
             return $reviewRoundId;
         }
 
-        // Accept out of review -> stage 4.
-        $this->recordDecision($submissionId, Decision::ACCEPT, WORKFLOW_STAGE_ID_EXTERNAL_REVIEW, $reviewRoundId);
+        // Accept out of review -> stage 4. The historical Decision Date from
+        // Notion travels here so the first post-cutover sync doesn't rewrite
+        // Notion's real acceptance date with populate's run time. Sync's
+        // DecisionHistory::decisionDate() reads dateDecided off the last
+        // decision that maps to a notionDecision, and ACCEPT is the only one
+        // populate creates that does map.
+        $this->recordDecision(
+            $submissionId,
+            Decision::ACCEPT,
+            WORKFLOW_STAGE_ID_EXTERNAL_REVIEW,
+            $reviewRoundId,
+            $historicalDecisionDate
+        );
 
         if ($targetStage === WORKFLOW_STAGE_ID_EDITING) {
             return $reviewRoundId;
         }
 
-        // Send to production -> stage 5.
+        // Send to production -> stage 5. Also DELIBERATELY_IGNORED by sync,
+        // so date doesn't matter.
         $this->recordDecision($submissionId, Decision::SEND_TO_PRODUCTION, WORKFLOW_STAGE_ID_EDITING);
         return $reviewRoundId;
     }
 
-    private function recordDecision(int $submissionId, int $decisionConstant, int $stageId, ?int $reviewRoundId = null): void
-    {
+    private function recordDecision(
+        int $submissionId,
+        int $decisionConstant,
+        int $stageId,
+        ?int $reviewRoundId = null,
+        ?string $dateDecided = null
+    ): void {
         $decisionType = Repo::decision()->getDecisionType($decisionConstant);
         if (!$decisionType) {
             throw new \RuntimeException("No decision type registered for constant {$decisionConstant}");
@@ -1666,7 +1698,7 @@ TXT;
             'decision' => $decisionConstant,
             'editorId' => $this->editor->getId(),
             'stageId' => $stageId,
-            'dateDecided' => Core::getCurrentDate(),
+            'dateDecided' => $dateDecided ?? Core::getCurrentDate(),
         ];
         if ($reviewRoundId) {
             $data['reviewRoundId'] = $reviewRoundId;
