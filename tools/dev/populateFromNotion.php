@@ -273,6 +273,7 @@ class PopulateFromNotionTool extends CommandLineTool
         'users_reused' => 0,
         'guest_editors_assigned' => 0,
         'guest_editors_already_present' => 0,
+        'guest_editors_skipped_manager' => 0,
         'reviews_created' => 0,
         'files_uploaded' => 0,
         'files_missing' => 0,
@@ -970,11 +971,24 @@ TXT;
 
             $assigned = 0;
             $already = 0;
+            $skippedManager = 0;
             foreach ($editorPageIds as $editorPageId) {
                 $user = $this->upsertUserFromPeoplePage($editorPageId, []);
                 if (!$user) {
                     continue;
                 }
+
+                // Journal Manager / Journal Editor / Managing Editor
+                // (all role_id=MANAGER) can already edit every section, so a
+                // Guest Editor role + section-level assignment on top of that
+                // adds no capability and clutters the section-editor UI with
+                // a redundant row per user. Skip both grants for these users.
+                if ($this->userHasManagerRole($user)) {
+                    $skippedManager++;
+                    $this->summary['guest_editors_skipped_manager']++;
+                    continue;
+                }
+
                 $this->assignGuestEditorRoleIfMissing($user, $guestGroupId);
 
                 // Cannot use $subEditorsDao->editorExists() — its SQL still
@@ -1007,11 +1021,12 @@ TXT;
             }
 
             $this->info(sprintf(
-                "SI [%s] '%s': %d guest editor(s) assigned, %d already present.",
+                "SI [%s] '%s': %d guest editor(s) assigned, %d already present, %d skipped (manager-tier).",
                 $siShort,
                 $section->getLocalizedTitle(),
                 $assigned,
-                $already
+                $already,
+                $skippedManager
             ));
         }
     }
@@ -1093,6 +1108,17 @@ TXT;
             return;
         }
         Repo::userGroup()->assignUserToGroup($user->getId(), $guestGroupId);
+    }
+
+    /**
+     * True if $user holds any MANAGER-role user_group in this context
+     * (Journal Manager, Journal Editor, Managing Editor).
+     */
+    private function userHasManagerRole(\PKP\user\User $user): bool
+    {
+        return Repo::userGroup()
+            ->userUserGroups($user->getId(), $this->context->getId())
+            ->first(fn ($g) => (int) $g->roleId === Role::ROLE_ID_MANAGER) !== null;
     }
 
     /**
@@ -2911,6 +2937,7 @@ TXT;
         fwrite(STDERR, sprintf("  users reused:             %d\n", $s['users_reused']));
         fwrite(STDERR, sprintf("  guest editors assigned:   %d\n", $s['guest_editors_assigned']));
         fwrite(STDERR, sprintf("  guest editors present:    %d\n", $s['guest_editors_already_present']));
+        fwrite(STDERR, sprintf("  guest editors skipped (manager-tier user): %d\n", $s['guest_editors_skipped_manager']));
         fwrite(STDERR, sprintf("  review assignments:       %d\n", $s['reviews_created']));
     }
 }
