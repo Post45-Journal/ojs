@@ -1332,6 +1332,31 @@ TXT;
         ]);
 
         $submissionId = Repo::submission()->add($submission, $publication, $this->context);
+
+        // Stamp the populate origin marker. Sync's ReviewTrackResolver reads
+        // this via SyncArticleJob::wasPopulatedFromNotion() and, at any stage
+        // where no OJS decision has produced a reviewStatus, returns null
+        // instead of deriving one from assignment counts or ownership. Those
+        // signals are pre-cutover artifacts for populated articles (populate
+        // deliberately skips intermediate R&R / Pre-PR Revision decisions per
+        // "OJS operational, Notion historical") and would clobber Notion's
+        // historical Review Status (`With Author`, `Received`, etc.). The
+        // first post-cutover decision at the current stage produces the
+        // decision-derived signal and normal derivation resumes.
+        //
+        // Stored as a plain submission_settings row (no schema declaration)
+        // because it's a private populate ↔ sync marker, not editor-facing
+        // state. Post-launch, once the Editorial Events backfill fills in
+        // the missing R&R decision history, this row becomes vestigial and
+        // can be removed en masse:
+        //   DELETE FROM submission_settings WHERE setting_name = 'post45PopulatedFromNotion';
+        \Illuminate\Support\Facades\DB::table('submission_settings')->insert([
+            'submission_id' => $submissionId,
+            'locale' => '',
+            'setting_name' => 'post45PopulatedFromNotion',
+            'setting_value' => '1',
+        ]);
+
         return $submissionId;
     }
 
