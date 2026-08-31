@@ -1703,7 +1703,20 @@ TXT;
         if ($reviewRoundId) {
             $data['reviewRoundId'] = $reviewRoundId;
         }
-        Repo::decision()->add(Repo::decision()->newDataObject($data));
+        $decisionId = Repo::decision()->add(Repo::decision()->newDataObject($data));
+
+        // Repo::decision()->add() unconditionally rewrites dateDecided to
+        // Core::getCurrentDate() at lib/pkp/classes/decision/Repository.php:222
+        // — so the value we passed above is silently discarded. When populate
+        // is stamping a historical decision (the ACCEPT path carrying Notion's
+        // real Decision Date), restore it with a direct UPDATE so sync's
+        // DecisionHistory reads the historical value and doesn't rewrite
+        // Notion's cell with populate's run time.
+        if ($dateDecided !== null) {
+            \Illuminate\Support\Facades\DB::table('edit_decisions')
+                ->where('edit_decision_id', $decisionId)
+                ->update(['date_decided' => $dateDecided]);
+        }
     }
 
     // ---------------------------------------------------------------------
