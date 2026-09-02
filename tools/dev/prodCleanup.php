@@ -14,18 +14,32 @@
  *
  * Usage:
  *   php tools/dev/prodCleanup.php [--confirm]
- *                                 [--delete-submissions]
+ *                                 [--delete-submissions[=ID1,ID2,...]]
  *                                 [--delete-users=ID1,ID2,...]
  *                                 [--truncate-sync-ledger]
+ *
+ * `--delete-submissions` alone deletes ALL submissions in the context
+ * (the pre-launch nuke). `--delete-submissions=487,488,489` deletes only
+ * the listed ids — the shape used for targeted post-launch cleanups
+ * (test data left over after a QA pass, spam submissions, etc.). Notion
+ * pages for the deleted submissions and their review assignments are
+ * printed BEFORE deletion so the operator can hand-archive them (Notion
+ * writes aren't automated here on purpose — hand-review is cheaper than
+ * an accidentally-thorough auto-archive).
  *
  * Safety rails:
  *   - Dry-run by default. Real deletes need --confirm.
  *   - Aborts if any user in --delete-users has ROLE_ID_SITE_ADMIN. Same
  *     defensive check for the last remaining Manager (if deleting the
  *     user would drop the context's Manager count to zero, abort).
- *   - Per-entity ledger cleanup: when a submission or user is deleted,
- *     the tool also `forget()`s that entity's post45_notion_sync_state
- *     row so orphans never accumulate across ongoing spam-cleanup passes.
+ *   - Targeted --delete-submissions aborts if any listed id doesn't exist
+ *     or belongs to a different context — a typo shouldn't quietly delete
+ *     the wrong record.
+ *   - Per-entity ledger cleanup: when a submission is deleted, the tool
+ *     also `forget()`s that submission's ledger row AND every
+ *     review_assignment ledger row for review assignments the OJS
+ *     cascade just removed, so orphans never accumulate across passes.
+ *     Same for user deletion on the user's ledger row.
  *   - --truncate-sync-ledger is the additional nuke for the pre-launch
  *     case where populate's preflight requires an empty ledger. It is
  *     NOT safe post-launch (would blow away real sync state); opt-in.
@@ -41,6 +55,7 @@
 use APP\core\Application;
 use APP\facades\Repo;
 use APP\plugins\generic\post45NotionSync\classes\repository\SyncStateRepository;
+use APP\submission\Submission;
 use Illuminate\Support\Facades\DB;
 use PKP\cliTool\CommandLineTool;
 use PKP\context\Context;
@@ -56,6 +71,12 @@ class ProdCleanupTool extends CommandLineTool
     public bool $confirm = false;
     public bool $deleteSubmissions = false;
     public bool $truncateSyncLedger = false;
+    /**
+     * @var int[] Empty when --delete-submissions is passed without ids
+     *            (delete every submission in the context) OR when the flag
+     *            wasn't passed at all. Non-empty for the targeted mode.
+     */
+    public array $submissionIdsToDelete = [];
     /** @var int[] */
     public array $userIdsToDelete = [];
 
@@ -76,6 +97,13 @@ class ProdCleanupTool extends CommandLineTool
                 $this->confirm = true;
             } elseif ($arg === '--delete-submissions') {
                 $this->deleteSubmissions = true;
+            } elseif (preg_match('/^--delete-submissions=(.+)$/', $arg, $m)) {
+                $this->deleteSubmissions = true;
+                $this->submissionIdsToDelete = array_map('intval', array_filter(explode(',', $m[1]), 'strlen'));
+                if (empty($this->submissionIdsToDelete)) {
+                    fwrite(STDERR, "--delete-submissions=... requires at least one id.\n");
+                    exit(1);
+                }
             } elseif ($arg === '--truncate-sync-ledger') {
                 $this->truncateSyncLedger = true;
             } elseif (preg_match('/^--delete-users=(.+)$/', $arg, $m)) {
@@ -98,14 +126,24 @@ Bulk-delete submissions and/or users from OJS. See the file docblock for
 context. Dry-run by default; add --confirm to actually delete.
 
 Usage: {$this->scriptName} [--confirm]
-                          [--delete-submissions]
+                          [--delete-submissions[=ID1,ID2,...]]
                           [--delete-users=ID1,ID2,...]
                           [--truncate-sync-ledger]
+
+`--delete-submissions` alone deletes every submission in the context
+(pre-launch nuke). `--delete-submissions=487,488,489` deletes only the
+listed ids — the shape for targeted cleanups of test/spam submissions.
+Notion Article and Reader's Reports page ids are printed before each
+delete so the operator can hand-archive them on the Notion side.
 
 Common invocations:
 
   # Pre-launch full cleanup (all test data)
   {$this->scriptName} --delete-submissions --delete-users=3,5,6 --truncate-sync-ledger --confirm
+
+  # Targeted test-submission cleanup (post-launch)
+  {$this->scriptName} --delete-submissions=487,488,489
+  {$this->scriptName} --delete-submissions=487,488,489 --confirm
 
   # Ongoing spam-user cleanup (does NOT touch submissions or ledger)
   {$this->scriptName} --delete-users=45,52,63 --confirm
@@ -151,6 +189,44 @@ TXT;
 
     private function safetyChecks(): void
     {
+        $this->safetyChecksForTargetedSubmissions();
+        $this->safetyChecksForUsers();
+    }
+
+    /**
+     * If --delete-submissions=IDs was passed, every listed id must resolve to
+     * a submission in this context. Typos or cross-context references should
+     * abort before any writes, not silently do nothing (dry-run) or delete
+     * the wrong record (--confirm).
+     */
+    private function safetyChecksForTargetedSubmissions(): void
+    {
+        if (empty($this->submissionIdsToDelete)) {
+            return;
+        }
+        $problems = [];
+        foreach ($this->submissionIdsToDelete as $submissionId) {
+            $submission = Repo::submission()->get($submissionId);
+            if (!$submission) {
+                $problems[] = "id={$submissionId} does not exist";
+                continue;
+            }
+            if ((int) $submission->getData('contextId') !== self::CONTEXT_ID) {
+                $problems[] = "id={$submissionId} belongs to context "
+                    . $submission->getData('contextId')
+                    . ', not ' . self::CONTEXT_ID;
+            }
+        }
+        if (!empty($problems)) {
+            $this->die(
+                "REFUSING: --delete-submissions targets are inconsistent:\n    - "
+                . implode("\n    - ", $problems)
+            );
+        }
+    }
+
+    private function safetyChecksForUsers(): void
+    {
         if (empty($this->userIdsToDelete)) {
             return;
         }
@@ -194,36 +270,135 @@ TXT;
 
     private function doDeleteSubmissions(): void
     {
-        $submissions = Repo::submission()->getCollector()
-            ->filterByContextIds([self::CONTEXT_ID])
-            ->getMany();
-        $this->info(sprintf("\n=== Submissions: %d found ===", count($submissions)));
+        $submissions = $this->submissionsToDelete();
+        $mode = empty($this->submissionIdsToDelete) ? 'all in context' : 'targeted';
+        $this->info(sprintf("\n=== Submissions: %d found (%s) ===", count($submissions), $mode));
 
         foreach ($submissions as $submission) {
-            $submissionId = (int) $submission->getId();
-            $pub = $submission->getCurrentPublication();
-            $title = $pub?->getLocalizedFullTitle(null, 'text') ?? '(no title)';
-            $this->info(sprintf('  %s submission id=%d  %s', $this->prefix(), $submissionId, mb_substr($title, 0, 60)));
-
-            if (!$this->confirm) {
-                continue;
-            }
-
-            try {
-                // Per-entity ledger cleanup FIRST (so if delete fails we don't leave the ledger inconsistent — a re-run finds the entity, tries again).
-                $this->forgetLedgerRow(SyncStateRepository::ENTITY_SUBMISSION, $submissionId);
-                Repo::submission()->delete($submission);
-                $this->summary['submissions_deleted']++;
-            } catch (\Throwable $e) {
-                $this->summary['submissions_failed']++;
-                fwrite(STDERR, "    FAILED: {$e->getMessage()}\n");
-                // Full trace so we can diagnose the intermittent "Call to a
-                // member function getId() on null" that keeps hitting a few
-                // submissions. Frame with the actual null lookup is what we
-                // need to identify the plugin/hook responsible.
-                fwrite(STDERR, "    Trace:\n" . self::indentTrace($e->getTraceAsString()) . "\n");
-            }
+            $this->processSubmissionDeletion($submission);
         }
+    }
+
+    /**
+     * @return Submission[]
+     */
+    private function submissionsToDelete(): array
+    {
+        if (empty($this->submissionIdsToDelete)) {
+            return iterator_to_array(
+                Repo::submission()->getCollector()
+                    ->filterByContextIds([self::CONTEXT_ID])
+                    ->getMany()
+            );
+        }
+        // Targeted mode: safety pass has already confirmed every id exists
+        // and lives in this context, so straight lookups are safe here.
+        return array_map(
+            fn (int $id) => Repo::submission()->get($id),
+            $this->submissionIdsToDelete
+        );
+    }
+
+    private function processSubmissionDeletion(Submission $submission): void
+    {
+        $submissionId = (int) $submission->getId();
+        $pub = $submission->getCurrentPublication();
+        $title = $pub?->getLocalizedFullTitle(null, 'text') ?? '(no title)';
+        $this->info(sprintf('  %s submission id=%d  %s', $this->prefix(), $submissionId, mb_substr($title, 0, 60)));
+
+        // Enumerate review-assignment ids BEFORE deletion — the cascade will
+        // remove them from OJS but their sync-ledger rows stay behind.
+        $reviewAssignmentIds = $this->reviewAssignmentIdsForSubmission($submissionId);
+
+        // Notion pages: print BEFORE deletion so the operator has the ids
+        // needed to hand-archive the Article page + Reader's Reports pages.
+        // (No auto-archive: hand-review is safer given adopted-page semantics
+        // and the possibility of a shared page across databases.)
+        $this->printNotionPagesForCleanup($submissionId, $reviewAssignmentIds);
+
+        if (!$this->confirm) {
+            return;
+        }
+
+        try {
+            // Per-entity ledger cleanup FIRST (so if delete fails we don't
+            // leave the ledger inconsistent — a re-run finds the entity,
+            // tries again).
+            $this->forgetLedgerRow(SyncStateRepository::ENTITY_SUBMISSION, $submissionId);
+            foreach ($reviewAssignmentIds as $reviewAssignmentId) {
+                $this->forgetLedgerRow(SyncStateRepository::ENTITY_REVIEW_ASSIGNMENT, $reviewAssignmentId);
+            }
+            Repo::submission()->delete($submission);
+            $this->summary['submissions_deleted']++;
+        } catch (\Throwable $e) {
+            $this->summary['submissions_failed']++;
+            fwrite(STDERR, "    FAILED: {$e->getMessage()}\n");
+            // Full trace so we can diagnose the intermittent "Call to a
+            // member function getId() on null" that keeps hitting a few
+            // submissions. Frame with the actual null lookup is what we
+            // need to identify the plugin/hook responsible.
+            fwrite(STDERR, "    Trace:\n" . self::indentTrace($e->getTraceAsString()) . "\n");
+        }
+    }
+
+    /**
+     * @return int[]
+     */
+    private function reviewAssignmentIdsForSubmission(int $submissionId): array
+    {
+        $ids = [];
+        foreach (
+            Repo::reviewAssignment()->getCollector()
+                ->filterBySubmissionIds([$submissionId])
+                ->getMany() as $assignment
+        ) {
+            $ids[] = (int) $assignment->getId();
+        }
+        return $ids;
+    }
+
+    /**
+     * Print the Notion page ids the operator needs to hand-archive on the
+     * Notion side. Reads directly from the sync ledger — nothing else knows
+     * which Notion page an OJS entity was synced to. Silent for entities
+     * that were never synced (nothing to clean).
+     *
+     * @param int[] $reviewAssignmentIds
+     */
+    private function printNotionPagesForCleanup(int $submissionId, array $reviewAssignmentIds): void
+    {
+        $articlePages = $this->notionPagesFor(SyncStateRepository::ENTITY_SUBMISSION, [$submissionId]);
+        $reviewPages = $this->notionPagesFor(SyncStateRepository::ENTITY_REVIEW_ASSIGNMENT, $reviewAssignmentIds);
+
+        if (empty($articlePages) && empty($reviewPages)) {
+            $this->info('      (no Notion pages recorded for this submission — nothing to hand-archive)');
+            return;
+        }
+        $this->info('      Notion pages to archive by hand:');
+        foreach ($articlePages as $pageId) {
+            $this->info("        - Article: {$pageId}");
+        }
+        foreach ($reviewPages as $pageId) {
+            $this->info("        - Reader's Report: {$pageId}");
+        }
+    }
+
+    /**
+     * @param int[] $entityIds
+     *
+     * @return string[]
+     */
+    private function notionPagesFor(string $entityType, array $entityIds): array
+    {
+        if (empty($entityIds)) {
+            return [];
+        }
+        return DB::table(SyncStateRepository::TABLE)
+            ->where('entity_type', $entityType)
+            ->whereIn('entity_id', $entityIds)
+            ->whereNotNull('notion_page_id')
+            ->pluck('notion_page_id')
+            ->all();
     }
 
     private static function indentTrace(string $trace): string
