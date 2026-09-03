@@ -54,6 +54,7 @@ use APP\facades\Repo;
 use PKP\cliTool\CommandLineTool;
 use PKP\db\DAORegistry;
 use PKP\plugins\PluginRegistry;
+use PKP\submission\reviewAssignment\ReviewAssignment;
 
 require(dirname(__FILE__) . '/../bootstrap.php');
 
@@ -80,6 +81,7 @@ class AdjustReviewDatesTool extends CommandLineTool
     ];
 
     private ?int $reviewId = null;
+    private ?int $listForSubmissionId = null;
     private bool $dryRun = false;
     private bool $yes = false;
 
@@ -109,6 +111,11 @@ class AdjustReviewDatesTool extends CommandLineTool
                 continue;
             }
 
+            if (preg_match('/^--for-submission=(\d+)$/', $arg, $m)) {
+                $this->listForSubmissionId = (int) $m[1];
+                continue;
+            }
+
             if (preg_match('/^--clear-(\w[\w-]*)$/', $arg, $m)) {
                 $key = $m[1];
                 if (!isset(self::CLEARABLE[$key])) {
@@ -135,8 +142,16 @@ class AdjustReviewDatesTool extends CommandLineTool
             $this->die("Unrecognized argument: {$arg}\nSee --help.");
         }
 
+        // Lookup mode: --for-submission is standalone; it prints and exits.
+        if ($this->listForSubmissionId !== null) {
+            if ($this->reviewId !== null || $this->edits !== []) {
+                $this->die('--for-submission is a lookup mode; do not combine with --review-id or date flags.');
+            }
+            return;
+        }
+
         if ($this->reviewId === null) {
-            $this->die('--review-id=<int> is required. See --help.');
+            $this->die('--review-id=<int> is required (or --for-submission=<sid> to look one up). See --help.');
         }
         if ($this->edits === []) {
             $this->die('No date changes given. Pass at least one --<field>=YYYY-MM-DD or --clear-<field>.');
@@ -160,9 +175,13 @@ which queues a SyncReviewJob so Notion picks up the change on the next
 `php lib/pkp/tools/jobs.php run`.
 
 Usage: {$this->scriptName} --review-id=<int> [date flags] [--dry-run] [--yes]
+       {$this->scriptName} --for-submission=<sid>
 
-Required:
-  --review-id=<int>  The review_assignments.review_id.
+Modes:
+  --review-id=<int>       Adjust one review assignment's dates.
+  --for-submission=<sid>  List every review assignment for a submission
+                          (id, round, reviewer, status) and exit. Use this
+                          to find the review_id you need for --review-id.
 
 Settable fields (YYYY-MM-DD; stored as midnight):
 {$settable}
@@ -180,6 +199,11 @@ TXT;
     public function execute(): void
     {
         $this->installContext();
+
+        if ($this->listForSubmissionId !== null) {
+            $this->listForSubmission($this->listForSubmissionId);
+            return;
+        }
 
         $assignment = Repo::reviewAssignment()->get($this->reviewId);
         if ($assignment === null) {
@@ -209,6 +233,65 @@ TXT;
     }
 
     /**
+     * List every review assignment for a submission with the identifying data
+     * an editor needs to pick the right one — the review_id (to pass back on
+     * the real invocation), plus round + reviewer + status for disambiguation.
+     */
+    private function listForSubmission(int $submissionId): void
+    {
+        $submission = Repo::submission()->get($submissionId);
+        if ($submission === null) {
+            $this->die("No submission with submission_id={$submissionId}.");
+        }
+        $title = $submission->getCurrentPublication()?->getLocalizedFullTitle(null, 'text') ?? '(no title)';
+
+        $assignments = Repo::reviewAssignment()->getCollector()
+            ->filterBySubmissionIds([$submissionId])
+            ->getMany();
+
+        echo "Submission {$submissionId} — {$title}\n\n";
+
+        if (count($assignments) === 0) {
+            echo "  (no review assignments)\n";
+            return;
+        }
+
+        printf("  %-9s  %-5s  %-32s  %s\n", 'review_id', 'round', 'reviewer', 'status');
+        printf("  %-9s  %-5s  %-32s  %s\n", str_repeat('-', 9), str_repeat('-', 5), str_repeat('-', 32), str_repeat('-', 22));
+
+        foreach ($assignments as $a) {
+            $reviewerId = (int) $a->getData('reviewerId');
+            $reviewer = $reviewerId > 0 ? Repo::user()->get($reviewerId) : null;
+            printf(
+                "  %-9d  %-5d  %-32s  %s\n",
+                (int) $a->getId(),
+                (int) $a->getData('round'),
+                substr($reviewer?->getFullName() ?? '(unknown user ' . $reviewerId . ')', 0, 32),
+                $this->statusLabel($a->getStatus())
+            );
+        }
+    }
+
+    /** Human-readable label for a REVIEW_ASSIGNMENT_STATUS_* code. */
+    private function statusLabel(int $status): string
+    {
+        return match ($status) {
+            ReviewAssignment::REVIEW_ASSIGNMENT_STATUS_AWAITING_RESPONSE => 'AWAITING_RESPONSE',
+            ReviewAssignment::REVIEW_ASSIGNMENT_STATUS_DECLINED => 'DECLINED',
+            ReviewAssignment::REVIEW_ASSIGNMENT_STATUS_RESPONSE_OVERDUE => 'RESPONSE_OVERDUE',
+            ReviewAssignment::REVIEW_ASSIGNMENT_STATUS_ACCEPTED => 'ACCEPTED',
+            ReviewAssignment::REVIEW_ASSIGNMENT_STATUS_REVIEW_OVERDUE => 'REVIEW_OVERDUE',
+            ReviewAssignment::REVIEW_ASSIGNMENT_STATUS_RECEIVED => 'RECEIVED',
+            ReviewAssignment::REVIEW_ASSIGNMENT_STATUS_COMPLETE => 'COMPLETE',
+            ReviewAssignment::REVIEW_ASSIGNMENT_STATUS_THANKED => 'THANKED',
+            ReviewAssignment::REVIEW_ASSIGNMENT_STATUS_CANCELLED => 'CANCELLED',
+            ReviewAssignment::REVIEW_ASSIGNMENT_STATUS_REQUEST_RESEND => 'REQUEST_RESEND',
+            ReviewAssignment::REVIEW_ASSIGNMENT_STATUS_VIEWED => 'VIEWED',
+            default => "STATUS_{$status}",
+        };
+    }
+
+    /**
      * Generic plugins register per-context, and CLI tools have no request
      * context, so `post45NotionSync` skips its register() entirely — the
      * ReviewAssignment::edit hook that queues SyncReviewJob never binds and
@@ -235,7 +318,7 @@ TXT;
     }
 
     /** Read the current values of every settable field, keyed by property name. */
-    private function snapshot(\PKP\submission\reviewAssignment\ReviewAssignment $assignment): array
+    private function snapshot(ReviewAssignment $assignment): array
     {
         $snap = [];
         foreach (self::SETTABLE as $property) {
@@ -244,7 +327,7 @@ TXT;
         return $snap;
     }
 
-    private function printContext(\PKP\submission\reviewAssignment\ReviewAssignment $assignment): void
+    private function printContext(ReviewAssignment $assignment): void
     {
         $reviewerId = (int) $assignment->getData('reviewerId');
         $reviewer = $reviewerId > 0 ? Repo::user()->get($reviewerId) : null;
