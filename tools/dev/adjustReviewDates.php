@@ -49,8 +49,11 @@
  *       [--dry-run] [--yes]
  */
 
+use APP\core\Application;
 use APP\facades\Repo;
 use PKP\cliTool\CommandLineTool;
+use PKP\db\DAORegistry;
+use PKP\plugins\PluginRegistry;
 
 require(dirname(__FILE__) . '/../bootstrap.php');
 
@@ -176,6 +179,8 @@ TXT;
 
     public function execute(): void
     {
+        $this->installContext();
+
         $assignment = Repo::reviewAssignment()->get($this->reviewId);
         if ($assignment === null) {
             $this->die("No review assignment with review_id={$this->reviewId}.");
@@ -201,6 +206,32 @@ TXT;
 
         echo "\nUpdated review {$this->reviewId}. Sync job queued.\n";
         echo "Run: php lib/pkp/tools/jobs.php run\n";
+    }
+
+    /**
+     * Generic plugins register per-context, and CLI tools have no request
+     * context, so `post45NotionSync` skips its register() entirely — the
+     * ReviewAssignment::edit hook that queues SyncReviewJob never binds and
+     * the write is silently unmirrored. Same pattern populate uses: install
+     * the context on the router, then re-register the plugin against it.
+     * See OJS-DEV-NOTES.md worker-context gotcha.
+     */
+    private function installContext(): void
+    {
+        /** @var \APP\journal\JournalDAO $journalDao */
+        $journalDao = DAORegistry::getDAO('JournalDAO');
+        $all = $journalDao->getAll(true)->toArray();
+        if (empty($all)) {
+            $this->die('No enabled journals found; cannot install a context.');
+        }
+        $context = $all[0];
+
+        Application::get()->getRequest()->getRouter()->_context = $context;
+
+        $sync = PluginRegistry::getPlugin('generic', 'post45notionsyncplugin');
+        if ($sync) {
+            $sync->register('generic', $sync->getPluginPath(), $context->getId());
+        }
     }
 
     /** Read the current values of every settable field, keyed by property name. */
