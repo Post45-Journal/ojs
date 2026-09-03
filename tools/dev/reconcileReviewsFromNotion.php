@@ -156,6 +156,10 @@ class ReconcileReviewsFromNotionTool extends CommandLineTool
                 $this->csvPath = $m[1];
                 continue;
             }
+            if (preg_match('/^--google-token=(.+)$/', $arg, $m)) {
+                $this->googleTokenPath = $m[1];
+                continue;
+            }
             $this->die("Unrecognized argument: {$arg}\nSee --help.");
         }
 
@@ -172,7 +176,7 @@ class ReconcileReviewsFromNotionTool extends CommandLineTool
         echo <<<TXT
 Batch-reconcile OJS review assignments from Notion Reader's Reports.
 
-Usage: {$this->scriptName} --csv=<path> [--execute] [--verbose]
+Usage: {$this->scriptName} --csv=<path> [--google-token=<path>] [--execute] [--verbose]
 
 CSV columns (header row required, exactly these two):
   submission_id       — OJS submission this R.R. belongs to
@@ -184,8 +188,13 @@ Report property = row still reconciles, file attachment skipped.
 
 Defaults:
   dry-run (nothing is written; no Notion writes; no OJS writes)
-  --execute      opt in to real writes
-  --verbose      per-row detail
+  --execute            opt in to real writes
+  --verbose            per-row detail
+  --google-token=<path>  OAuth token JSON for Drive downloads. Defaults
+                       to ~/dev/notion_automations/token.json when that
+                       exists (dev convention). Required on hosts where
+                       that path doesn't exist and reports aren't
+                       "anyone with the link" shared.
 
 After execute: run `php lib/pkp/tools/jobs.php run` to drain the queued
 SyncReviewJob calls — that's what actually pushes the changes back to
@@ -264,12 +273,14 @@ TXT;
         $this->rrLedger = new SyncStateRepository($readersReportsDatabaseId);
         $this->readersReportsDatabaseId = $readersReportsDatabaseId;
 
-        // Default Google Drive OAuth token — mirrors populate's default so
-        // Drive downloads Just Work when the notion_automations sibling is
-        // present. Unauthenticated fallback covers publicly-shared files.
-        $default = ($_SERVER['HOME'] ?? '') . '/dev/notion_automations/token.json';
-        if (is_file($default)) {
-            $this->googleTokenPath = $default;
+        // Google Drive OAuth token. --google-token=<path> wins; otherwise fall
+        // back to the notion_automations sibling location that populate also
+        // defaults to. Unauthenticated fallback covers publicly-shared files.
+        if ($this->googleTokenPath === null) {
+            $default = ($_SERVER['HOME'] ?? '') . '/dev/notion_automations/token.json';
+            if (is_file($default)) {
+                $this->googleTokenPath = $default;
+            }
         }
     }
 
