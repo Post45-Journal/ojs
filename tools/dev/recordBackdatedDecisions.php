@@ -44,6 +44,7 @@ use PKP\core\Core;
 use PKP\core\Registry;
 use PKP\db\DAORegistry;
 use PKP\decision\Decision;
+use PKP\plugins\PluginRegistry;
 use PKP\security\Role;
 
 require(dirname(__FILE__) . '/../bootstrap.php');
@@ -164,6 +165,16 @@ TXT;
 
         Registry::set('user', $this->editor);
         Application::get()->getRequest()->getRouter()->_context = $this->context;
+
+        // Generic plugins register per-context; CLI tools have no request
+        // context, so post45NotionSync would otherwise skip its register()
+        // entirely and the Decision::add hook that queues SyncArticleJob
+        // never binds. See OJS-DEV-NOTES worker-context gotcha.
+        $sync = PluginRegistry::getPlugin('generic', 'post45notionsyncplugin');
+        if (!$sync) {
+            $this->die('post45NotionSync plugin not registered. Enable it before running this tool.');
+        }
+        $sync->register('generic', $sync->getPluginPath(), $this->context->getId());
     }
 
     private function resolveContext()
