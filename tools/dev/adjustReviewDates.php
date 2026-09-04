@@ -42,10 +42,12 @@
  *
  * Usage:
  *   php tools/dev/adjustReviewDates.php --review-id=<int> \
- *       [--assigned=YYYY-MM-DD] [--notified=YYYY-MM-DD | --clear-notified] \
- *       [--confirmed=YYYY-MM-DD | --clear-confirmed] \
- *       [--response-due=YYYY-MM-DD] [--due=YYYY-MM-DD] \
- *       [--completed=YYYY-MM-DD | --clear-completed] \
+ *       [--assigned=YYYY-MM-DD | -a=YYYY-MM-DD] \
+ *       [--notified=YYYY-MM-DD | -n=YYYY-MM-DD | --clear-notified] \
+ *       [--confirmed=YYYY-MM-DD | -c=YYYY-MM-DD | --clear-confirmed] \
+ *       [--response-due=YYYY-MM-DD | -r=YYYY-MM-DD] \
+ *       [--due=YYYY-MM-DD | -d=YYYY-MM-DD] \
+ *       [--completed=YYYY-MM-DD | -e=YYYY-MM-DD | --clear-completed] \
  *       [--dry-run] [--yes]
  */
 
@@ -80,6 +82,20 @@ class AdjustReviewDatesTool extends CommandLineTool
         'completed' => 'dateCompleted',
     ];
 
+    /**
+     * Short-flag aliases for the settable fields (long-form clearables have
+     * no short form — less frequent). `-e` for --completed uses "end date"
+     * as the mnemonic since `-c` is confirmed.
+     */
+    private const SHORT_ALIASES = [
+        'a' => 'assigned',
+        'n' => 'notified',
+        'c' => 'confirmed',
+        'r' => 'response-due',
+        'd' => 'due',
+        'e' => 'completed',
+    ];
+
     private ?int $reviewId = null;
     private ?int $listForSubmissionId = null;
     private bool $dryRun = false;
@@ -93,6 +109,13 @@ class AdjustReviewDatesTool extends CommandLineTool
         parent::__construct($argv);
 
         foreach ($this->argv as $arg) {
+            // Expand short-flag aliases (-a=YYYY-MM-DD → --assigned=YYYY-MM-DD)
+            // before the existing --<flag>=<value> regex sees them. Keeps the
+            // parsing logic uniform between short and long forms.
+            if (preg_match('/^-([a-zA-Z])(=.*)?$/', $arg, $m) && isset(self::SHORT_ALIASES[$m[1]])) {
+                $arg = '--' . self::SHORT_ALIASES[$m[1]] . ($m[2] ?? '');
+            }
+
             if ($arg === '--dry-run') {
                 $this->dryRun = true;
                 continue;
@@ -160,9 +183,11 @@ class AdjustReviewDatesTool extends CommandLineTool
 
     public function usage(): void
     {
+        $shortByLong = array_flip(self::SHORT_ALIASES);
         $settable = '';
         foreach (array_keys(self::SETTABLE) as $flag) {
-            $settable .= "  --{$flag}=YYYY-MM-DD\n";
+            $short = isset($shortByLong[$flag]) ? "  (-{$shortByLong[$flag]})" : '';
+            $settable .= "  --{$flag}=YYYY-MM-DD{$short}\n";
         }
         $clearable = '';
         foreach (array_keys(self::CLEARABLE) as $flag) {
