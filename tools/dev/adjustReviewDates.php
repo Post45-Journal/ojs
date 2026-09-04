@@ -153,9 +153,9 @@ class AdjustReviewDatesTool extends CommandLineTool
         if ($this->reviewId === null) {
             $this->die('--review-id=<int> is required (or --for-submission=<sid> to look one up). See --help.');
         }
-        if ($this->edits === []) {
-            $this->die('No date changes given. Pass at least one --<field>=YYYY-MM-DD or --clear-<field>.');
-        }
+        // --review-id with no date flags is a valid VIEW mode: print current
+        // values and exit. Useful for fields the OJS Edit Review dialog
+        // doesn't expose (dateAssigned/Notified/Confirmed/Completed).
     }
 
     public function usage(): void
@@ -175,10 +175,15 @@ which queues a SyncReviewJob so Notion picks up the change on the next
 `php lib/pkp/tools/jobs.php run`.
 
 Usage: {$this->scriptName} --review-id=<int> [date flags] [--dry-run] [--yes]
+       {$this->scriptName} --review-id=<int>
        {$this->scriptName} --for-submission=<sid>
 
 Modes:
-  --review-id=<int>       Adjust one review assignment's dates.
+  --review-id=<int>       Adjust one review assignment's dates. With no date
+                          flags, prints the assignment's current dates and
+                          exits (useful for fields the OJS Edit Review dialog
+                          doesn't expose: dateAssigned, dateNotified,
+                          dateConfirmed, dateCompleted).
   --for-submission=<sid>  List every review assignment for a submission
                           (id, round, reviewer, status) and exit. Use this
                           to find the review_id you need for --review-id.
@@ -211,9 +216,14 @@ TXT;
         }
 
         $before = $this->snapshot($assignment);
-        $after = array_merge($before, $this->edits);
-
         $this->printContext($assignment);
+
+        if ($this->edits === []) {
+            $this->printSnapshot($before);
+            return;
+        }
+
+        $after = array_merge($before, $this->edits);
         $this->printDiff($before, $after);
 
         if ($this->dryRun) {
@@ -357,6 +367,16 @@ TXT;
                 $this->fmtDate($b),
                 $this->fmtDate($a)
             );
+        }
+    }
+
+    private function printSnapshot(array $snapshot): void
+    {
+        echo "\nCurrent dates:\n";
+        printf("  %-18s  %-22s\n", 'field', 'value');
+        printf("  %-18s  %-22s\n", str_repeat('-', 18), str_repeat('-', 22));
+        foreach (self::SETTABLE as $property) {
+            printf("  %-18s  %-22s\n", $property, $this->fmtDate($snapshot[$property] ?? null));
         }
     }
 
