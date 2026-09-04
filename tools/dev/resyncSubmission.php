@@ -36,6 +36,7 @@
  *
  * Usage:
  *   php tools/dev/resyncSubmission.php --submission-id=<int>
+ *   php tools/dev/resyncSubmission.php --submission-id=1,2,3
  *
  * Then drain jobs so Notion actually catches up:
  *   php lib/pkp/tools/jobs.php run
@@ -52,7 +53,8 @@ require(dirname(__FILE__) . '/../bootstrap.php');
 
 class ResyncSubmissionTool extends CommandLineTool
 {
-    private ?int $submissionId = null;
+    /** @var int[] */
+    private array $submissionIds = [];
 
     private $context;
 
@@ -65,24 +67,34 @@ class ResyncSubmissionTool extends CommandLineTool
                 $this->usage();
                 exit(0);
             }
-            if (preg_match('/^--submission-id=(\d+)$/', $arg, $m)) {
-                $this->submissionId = (int) $m[1];
+            if (preg_match('/^--submission-id=([\d,]+)$/', $arg, $m)) {
+                foreach (explode(',', $m[1]) as $piece) {
+                    $piece = trim($piece);
+                    if ($piece === '') {
+                        continue;
+                    }
+                    $this->submissionIds[] = (int) $piece;
+                }
                 continue;
             }
             $this->die("Unrecognized argument: {$arg}\nSee --help.");
         }
 
-        if ($this->submissionId === null) {
-            $this->die('--submission-id=<int> is required. See --help.');
+        if ($this->submissionIds === []) {
+            $this->die('--submission-id=<int>[,<int>...] is required. See --help.');
         }
     }
 
     public function usage(): void
     {
         echo <<<TXT
-Force-dispatch a Notion sync for one submission.
+Force-dispatch a Notion sync for one or more submissions.
 
-Usage: {$this->scriptName} --submission-id=<int>
+Usage: {$this->scriptName} --submission-id=<int>[,<int>...]
+
+Examples:
+  {$this->scriptName} --submission-id=474
+  {$this->scriptName} --submission-id=474,479,483
 
 Then drain the queue so Notion catches up:
   php lib/pkp/tools/jobs.php run
@@ -94,32 +106,58 @@ TXT;
     {
         $this->installContext();
 
-        $submission = Repo::submission()->get($this->submissionId);
+        $queued = 0;
+        $skipped = 0;
+        foreach ($this->submissionIds as $id) {
+            if ($this->processOne($id)) {
+                $queued++;
+            } else {
+                $skipped++;
+            }
+        }
+
+        echo "\n=== resyncSubmission summary ===\n";
+        echo "  queued:   {$queued}\n";
+        echo "  skipped:  {$skipped}\n";
+        if ($queued > 0) {
+            echo "\nDrain the queue so Notion catches up:\n";
+            echo "  php lib/pkp/tools/jobs.php run\n";
+        }
+    }
+
+    /** @return bool true if a job was queued, false if the id was skipped */
+    private function processOne(int $submissionId): bool
+    {
+        $submission = Repo::submission()->get($submissionId);
         if (!$submission) {
-            $this->die("No submission with id={$this->submissionId}.");
+            fwrite(STDERR, "  sub={$submissionId}  SKIP: no submission with that id\n");
+            return false;
         }
         if ((int) $submission->getData('contextId') !== (int) $this->context->getId()) {
-            $this->die(sprintf(
-                'Submission %d belongs to context %d, not %d.',
-                $this->submissionId,
+            fwrite(STDERR, sprintf(
+                "  sub=%d  SKIP: belongs to context %d, not %d\n",
+                $submissionId,
                 (int) $submission->getData('contextId'),
                 (int) $this->context->getId()
             ));
+            return false;
         }
 
         $title = $submission->getCurrentPublication()?->getLocalizedFullTitle(null, 'text');
-        echo "Submission #{$this->submissionId}\n";
-        echo '  Title:   ' . ($title ?: '(no title)') . "\n";
-        echo '  Stage:   ' . (int) $submission->getData('stageId') . "\n";
-        echo '  Status:  ' . (int) $submission->getData('status') . "\n";
+        fwrite(STDERR, sprintf(
+            "  sub=%-5d  stage=%d  status=%d  %s\n",
+            $submissionId,
+            (int) $submission->getData('stageId'),
+            (int) $submission->getData('status'),
+            $title ?: '(no title)'
+        ));
 
         dispatch(new SyncArticleJob(
             (int) $this->context->getId(),
-            $this->submissionId
+            $submissionId
         ));
 
-        echo "\nQueued SyncArticleJob. Drain with:\n";
-        echo "  php lib/pkp/tools/jobs.php run\n";
+        return true;
     }
 
     /**
