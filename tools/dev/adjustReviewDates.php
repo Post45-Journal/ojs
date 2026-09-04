@@ -42,10 +42,10 @@
  *
  * Usage:
  *   php tools/dev/adjustReviewDates.php --review-id=<int> \
- *       [--date-assigned=YYYY-MM-DD] [--clear-notified] [--date-notified=YYYY-MM-DD] \
- *       [--date-confirmed=YYYY-MM-DD | --clear-confirmed] \
+ *       [--assigned=YYYY-MM-DD] [--notified=YYYY-MM-DD | --clear-notified] \
+ *       [--confirmed=YYYY-MM-DD | --clear-confirmed] \
  *       [--response-due=YYYY-MM-DD] [--due=YYYY-MM-DD] \
- *       [--date-completed=YYYY-MM-DD | --clear-completed] \
+ *       [--completed=YYYY-MM-DD | --clear-completed] \
  *       [--dry-run] [--yes]
  */
 
@@ -65,12 +65,12 @@ class AdjustReviewDatesTool extends CommandLineTool
      * order the summary prints them in.
      */
     private const SETTABLE = [
-        'date-assigned' => 'dateAssigned',
-        'date-notified' => 'dateNotified',
-        'date-confirmed' => 'dateConfirmed',
+        'assigned' => 'dateAssigned',
+        'notified' => 'dateNotified',
+        'confirmed' => 'dateConfirmed',
         'response-due' => 'dateResponseDue',
         'due' => 'dateDue',
-        'date-completed' => 'dateCompleted',
+        'completed' => 'dateCompleted',
     ];
 
     /** Fields OJS allows to be nullable and this tool allows clearing. */
