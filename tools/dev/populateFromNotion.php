@@ -13,6 +13,21 @@
  * (--reset-and-repopulate wiping post-cutover editorial work). Safety
  * checks below enforce both conditions.
  *
+ * ## Post-cutover targeted repopulate (--targeted-repopulate)
+ *
+ * A single-article escape hatch for the "we deleted a borderline submission
+ * via prodCleanup and the article turned out NOT to get rejected, so we now
+ * need it back in OJS" scenario. Requires --article=<notion-page-id>.
+ * Bypasses the ledger-empty preflight guard and instead performs a targeted
+ * check: refuses if the given Notion page already has a ledger row (there's
+ * still an OJS submission behind it, so use `prodCleanup
+ * --delete-submissions=…` first). Still refuses if sync is enabled — the
+ * operator must disable sync in the plugin settings for the duration of the
+ * run and re-enable after, so the ledger row this script stamps is in place
+ * before any natural OJS→Notion sync attempts to create a duplicate page.
+ * Guest-editor seeding is skipped (those subeditor_submission_group rows
+ * survive submission deletion and are still correct).
+ *
  * See [[project_sequenced_backlog]] G3b for the design context.
  *
  * Usage:
@@ -244,6 +259,7 @@ class PopulateFromNotionTool extends CommandLineTool
     public ?string $filesRoot = null;
     public ?string $generateManifest = null;
     public ?string $googleTokenPath = null;
+    public bool $targetedRepopulate = false;
 
     /** Cached Bearer token for the current run, refreshed on demand. */
     private ?string $googleAccessToken = null;
@@ -314,6 +330,8 @@ class PopulateFromNotionTool extends CommandLineTool
                 $this->generateManifest = self::expandPath($m[1]);
             } elseif (preg_match('/^--google-token=(.+)$/', $arg, $m)) {
                 $this->googleTokenPath = self::expandPath($m[1]);
+            } elseif ($arg === '--targeted-repopulate') {
+                $this->targetedRepopulate = true;
             } elseif ($arg === '--help' || $arg === '-h') {
                 $this->usage();
                 exit(0);
@@ -322,6 +340,11 @@ class PopulateFromNotionTool extends CommandLineTool
                 $this->usage();
                 exit(1);
             }
+        }
+
+        if ($this->targetedRepopulate && $this->singleArticleId === null) {
+            fwrite(STDERR, "--targeted-repopulate requires --article=<notion-page-id>.\n");
+            exit(1);
         }
     }
 
@@ -336,6 +359,7 @@ Usage: {$this->scriptName} [--dry-run] [--limit=N] [--article=<page-id>]
                           [--verbose] [--journal=PATH]
                           [--files-manifest=CSV --files-root=DIR]
                           [--generate-manifest=OUT.csv]
+                          [--targeted-repopulate --article=<page-id>]
 
 Options:
   --dry-run                    Resolve + log every intended write, do nothing.
@@ -356,6 +380,15 @@ Options:
                                kind) and (R.R., 'reviewer_report'). No OJS
                                writes. User fills file_path for files that
                                exist and deletes rows for files that don't.
+  --targeted-repopulate        Single-article escape hatch for post-cutover
+                               re-adds after `prodCleanup` deleted a borderline
+                               submission that didn't end up rejected. Requires
+                               --article=. Bypasses the ledger-empty guard.
+                               Refuses if the target Notion page still has a
+                               ledger row (submission still exists — run
+                               prodCleanup first). Sync must be disabled in
+                               plugin settings for the run; re-enable after.
+                               Guest-editor seeding is skipped.
 
 File-manifest CSV shape:
   Columns:  notion_page_id, notion_rr_id, file_path, file_kind, round, notes
@@ -397,7 +430,14 @@ TXT;
         // `subeditor_submission_group` and produces StageAssignments, so setting
         // up the section's editors before the per-article loop lets OJS's own
         // mechanism handle each submission's assignments.
-        $this->setupGuestEditorsForPairedSections($this->specialIssuePairings);
+        //
+        // Skipped in targeted-repopulate mode: `subeditor_submission_group`
+        // rows survive submission deletion (they're section-scoped, not
+        // submission-scoped), so re-seeding would just re-hit the Notion API
+        // for every paired SI and no-op on the OJS side.
+        if (!$this->targetedRepopulate) {
+            $this->setupGuestEditorsForPairedSections($this->specialIssuePairings);
+        }
         $this->loadFilesManifest();
 
         $this->info("Fetching in-progress articles from Notion database {$this->articlesDatabaseId}");
@@ -552,16 +592,42 @@ TXT;
             );
         }
 
-        // TODO(g3b-reset): once --reset-and-repopulate lands, allow existing
-        // ledger rows when the flag is present.
-        $existing = \Illuminate\Support\Facades\DB::table(SyncStateRepository::TABLE)->count();
-        if ($existing > 0) {
-            $this->die(
-                "Ledger table post45_notion_sync_state already has {$existing} row(s). "
-                . 'Populate assumes an empty ledger to avoid collisions with a prior '
-                . 'population run. Truncate the table (or use --reset-and-repopulate '
-                . 'once implemented) before rerunning.'
-            );
+        if ($this->targetedRepopulate) {
+            // In targeted mode the ledger is expected to be non-empty (this
+            // is a post-cutover re-add). Instead of the empty-ledger check,
+            // refuse only if the specific Notion page we're about to
+            // re-populate still has a ledger row — that means its OJS
+            // submission wasn't cleaned up first, and re-running would either
+            // silently update the wrong row (recordPageId is upsert-shaped)
+            // or create a duplicate submission tied to the same Notion page.
+            $existingRow = \Illuminate\Support\Facades\DB::table(SyncStateRepository::TABLE)
+                ->where('notion_database_id', $this->articlesDatabaseId)
+                ->where('notion_page_id', $this->singleArticleId)
+                ->where('entity_type', SyncStateRepository::ENTITY_SUBMISSION)
+                ->first();
+            if ($existingRow !== null) {
+                $this->die(
+                    "Notion page {$this->singleArticleId} still has a ledger row "
+                    . "(submission_id={$existingRow->entity_id}). Targeted repopulate "
+                    . 'refuses to run while the article is still populated. Run '
+                    . "`php tools/dev/prodCleanup.php --delete-submissions={$existingRow->entity_id} --confirm` "
+                    . 'first (that deletes the submission AND forgets the ledger row), '
+                    . 'then rerun this command.'
+                );
+            }
+        } else {
+            // TODO(g3b-reset): once --reset-and-repopulate lands, allow existing
+            // ledger rows when the flag is present.
+            $existing = \Illuminate\Support\Facades\DB::table(SyncStateRepository::TABLE)->count();
+            if ($existing > 0) {
+                $this->die(
+                    "Ledger table post45_notion_sync_state already has {$existing} row(s). "
+                    . 'Populate assumes an empty ledger to avoid collisions with a prior '
+                    . 'population run. Truncate the table (or use --reset-and-repopulate '
+                    . 'once implemented) before rerunning. For a single-article re-add '
+                    . 'post-cutover, use --targeted-repopulate --article=<notion-page-id>.'
+                );
+            }
         }
 
         if ($this->dryRun) {
