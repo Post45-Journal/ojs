@@ -32,6 +32,8 @@ registry/uiLocaleKeysBackend.json
 /plugins/generic/smtpLocalDomain
 /plugins/themes/pragmaSubmissions
 /plugins/generic/post45DevEmailGuard
+/plugins/generic/authorWithdrew
+/plugins/generic/post45LoginFix
 
 # Claude Code local session state (per-user, per-machine)
 /.claude/
