@@ -113,6 +113,20 @@ error loudly if upstream shifts underneath them — worth a grep before pushing)
   - `RewriteAnonymizedDownloadFilename` — depends on `File::download` hook
     signature + FileApiHandler's anonymized-filename guard + the router
     handler's authorized-context access pattern.
+- **Local pkp-lib submodule patches** (carried as working-tree edits on top of
+  upstream `stable-3_5_0`; a clean `git merge upstream/stable-3_5_0` will flag
+  conflicts, but a silent refactor around the patched method won't — rerun
+  the paired integration test after any pkp-lib bump):
+  - `lib/pkp/classes/invitation/core/Invitation.php` +
+    `lib/pkp/classes/invitation/invitations/reviewerAccess/ReviewerAccessInvite.php`
+    — mirrors pkp/pkp-lib#13259's shape: extracts `invite()`'s sweep into an
+    overridable `getInvitationsToDelete(): Collection`; ReviewerAccessInvite
+    overrides to an empty Collection so reminder emails stop invalidating
+    each other's one-click URLs. Strictly broader than #13259 (which narrows
+    by reviewAssignmentId and still 404s in the same-assignment case due to
+    setData() re-invocation). When #13259 lands, delete our override's body
+    and reconcile. Regression guard:
+    `tests/ReviewerAccessReminderPersistsPriorInvitesTest.php` in post45Editorial.
 
 **Prod-specific quirks:**
 - The 1GB droplet OOMs during Vite builds without help: 1GB swap at `/swapfile` (persistent via
@@ -154,10 +168,8 @@ provides the discussion thread + decision tracking. The terminal action "Mark Pu
 WordPress" (custom `post45Editorial` decision) sets `STATUS_PUBLISHED`, stores the WordPress
 URL, emails the author, and blocks the public OJS article view.
 
-**In-flight (as of July 2026):** the "Mark Published" backend is built + headless-tested; the
-Vue frontend button injection and prod install were not yet finished. See `OJS-DEV-NOTES.md`
-for the technical record, the `post45-editorial-state` memory for live status, and `temp/` for
-the browser-test checklist. Uncommitted work may be present — don't assume the tree is clean.
+See `OJS-DEV-NOTES.md` for the technical record, and the `post45-editorial-state`
+memory for live status. Uncommitted work may be present — don't assume the tree is clean.
 
 ## Core Coding Rules
 
